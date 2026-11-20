@@ -37,6 +37,12 @@ management:
 
 shortener:
   base-url: ${SHORTENER_BASE_URL:http://localhost:8085}
+  # name:sha256hex(key), comma-separated. Empty = every /api request gets 401.
+  api-keys: ${SHORTENER_API_KEYS:}
+  redirect:
+    status: 302
+  idempotency:
+    ttl: 24h
   url:
     max-length: 2048
     allowed-schemes: [http, https]

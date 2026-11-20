@@ -15,7 +15,17 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties("shortener")
 public record ShortenerProperties(
-    @NotBlank String baseUrl, @Valid Code code, @Valid Alias alias, @Valid Url url) {
+    @NotBlank String baseUrl,
+    @DefaultValue("") String apiKeys,
+    @Valid Code code,
+    @Valid Alias alias,
+    @Valid Url url,
+    @DefaultValue @Valid Redirect redirect,
+    @DefaultValue @Valid Idempotency idempotency) {
+
+  public record Redirect(@DefaultValue("302") @Min(301) @Max(308) int status) {}
+
+  public record Idempotency(@DefaultValue("24h") Duration ttl) {}
 
   public record Url(
       @DefaultValue("2048") @Min(16) int maxLength,

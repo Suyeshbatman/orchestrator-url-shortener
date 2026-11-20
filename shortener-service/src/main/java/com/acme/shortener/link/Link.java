@@ -2,6 +2,7 @@ package com.acme.shortener.link;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.relational.core.mapping.Table;
@@ -24,13 +25,13 @@ public record Link(
 
   public static Link newGenerated(
       long id, String code, String originalUrl, String createdBy, Clock clock) {
-    Instant now = clock.instant();
+    Instant now = now(clock);
     return new Link(id, code, originalUrl, false, LinkStatus.ACTIVE, createdBy, now, now, null);
   }
 
   public static Link newAlias(
       long id, String alias, String originalUrl, String createdBy, Clock clock) {
-    Instant now = clock.instant();
+    Instant now = now(clock);
     return new Link(id, alias, originalUrl, true, LinkStatus.ACTIVE, createdBy, now, now, null);
   }
 
@@ -51,8 +52,13 @@ public record Link(
         LinkStatus.DELETED,
         createdBy,
         createdAt,
-        clock.instant(),
+        now(clock),
         version);
+  }
+
+  /** Postgres timestamptz keeps microseconds; truncating keeps create and read responses equal. */
+  private static Instant now(Clock clock) {
+    return clock.instant().truncatedTo(ChronoUnit.MICROS);
   }
 
   // Withers used by Spring Data JDBC to populate generated values on an immutable record.
