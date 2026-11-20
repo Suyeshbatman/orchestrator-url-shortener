@@ -33,3 +33,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local agent rules (kept out of git for now)
+CLAUDE.md
