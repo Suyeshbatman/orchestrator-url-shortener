@@ -1,10 +1,36 @@
 server:
   port: 8085
+  shutdown: graceful
+
 spring:
   application:
     name: shortener-service
+  # Local runs pick up the repo-root .env (git-ignored). Real environment variables take precedence.
+  config:
+    import: optional:file:../.env[.properties]
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5434/shortener}
+    username: ${POSTGRES_USER:app}
+    password: ${POSTGRES_PASSWORD:}
+    hikari:
+      maximum-pool-size: 20
+      connection-timeout: 2000
+  flyway:
+    enabled: true
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+      timeout: 200ms
+
 management:
   endpoints:
     web:
       exposure:
         include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
