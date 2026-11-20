@@ -36,6 +36,12 @@ management:
         enabled: true
 
 shortener:
+  base-url: ${SHORTENER_BASE_URL:http://localhost:8085}
+  url:
+    max-length: 2048
+    allowed-schemes: [http, https]
+    block-private-networks: true
+    dns-timeout: 500ms
   code:
     length: 7
     # Required, 32+ characters. Never commit a real value.

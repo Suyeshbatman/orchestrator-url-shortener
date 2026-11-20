@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import java.time.Duration;
 import java.util.Set;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -13,7 +14,14 @@ import org.springframework.validation.annotation.Validated;
 /** Typed {@code shortener.*} configuration. Invalid values fail startup. */
 @Validated
 @ConfigurationProperties("shortener")
-public record ShortenerProperties(@Valid Code code, @Valid Alias alias) {
+public record ShortenerProperties(
+    @NotBlank String baseUrl, @Valid Code code, @Valid Alias alias, @Valid Url url) {
+
+  public record Url(
+      @DefaultValue("2048") @Min(16) int maxLength,
+      @DefaultValue({"http", "https"}) Set<String> allowedSchemes,
+      @DefaultValue("true") boolean blockPrivateNetworks,
+      @DefaultValue("500ms") Duration dnsTimeout) {}
 
   /**
    * @param secret Feistel key (env SHORTENER_CODE_SECRET), at least 32 characters
