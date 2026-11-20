@@ -1,0 +1,35 @@
+# Build output
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+build/
+.mvn/wrapper/maven-wrapper.jar
+
+# Secrets / local env
+.env
+*.env.local
+
+# Orchestrator runtime
+.agent-worktrees/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Eclipse / STS
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

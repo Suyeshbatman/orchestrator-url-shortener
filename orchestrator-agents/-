@@ -1,0 +1,2 @@
+com.acme:orchestrator-agents:jar:0.0.1-SNAPSHOT
+\- com.acme:orchestrator-core:jar:0.0.1-SNAPSHOT:compile
