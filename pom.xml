@@ -36,6 +36,7 @@
     <spotless.version>3.11.0</spotless.version>
     <jqwik.version>1.10.2</jqwik.version>
     <springdoc.version>3.2.1</springdoc.version>
+    <resilience4j.version>2.4.0</resilience4j.version>
   </properties>
 
   <dependencyManagement>
@@ -54,6 +55,11 @@
         <groupId>org.springdoc</groupId>
         <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
         <version>${springdoc.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-circuitbreaker</artifactId>
+        <version>${resilience4j.version}</version>
       </dependency>
       <dependency>
         <groupId>net.jqwik</groupId>

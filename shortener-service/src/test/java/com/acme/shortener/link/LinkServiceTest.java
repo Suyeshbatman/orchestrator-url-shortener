@@ -9,6 +9,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.acme.shortener.cache.CacheEntry;
+import com.acme.shortener.cache.LinkCache;
 import com.acme.shortener.code.AliasTakenException;
 import com.acme.shortener.code.AliasValidator;
 import com.acme.shortener.code.CodeGenerator;
@@ -22,7 +24,9 @@ import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
@@ -44,6 +48,7 @@ class LinkServiceTest {
           ids::incrementAndGet,
           FeistelPermutation.forCodeLength("test-only-feistel-secret-0123456789abcdef", 7, 4),
           7);
+  private final InMemoryLinkCache cache = new InMemoryLinkCache();
   private LinkService service;
 
   @BeforeEach
@@ -56,8 +61,8 @@ class LinkServiceTest {
         new AliasValidator(
             4, 32, "^[A-Za-z0-9_-]+$", Set.of("api"), repository::existsByCodeIgnoreCase);
     ShortenerProperties props =
-        new ShortenerProperties("http://sho.rt/", "", null, null, null, null, null);
-    service = new LinkService(repository, codes, aliases, urls, CLOCK, props);
+        new ShortenerProperties("http://sho.rt/", "", null, null, null, null, null, null);
+    service = new LinkService(repository, codes, aliases, urls, cache, CLOCK, props);
 
     when(repository.save(any(Link.class))).thenAnswer(inv -> inv.getArgument(0));
     when(repository.findByCode(anyString())).thenReturn(Optional.empty());
@@ -221,5 +226,100 @@ class LinkServiceTest {
 
     assertThatThrownBy(() -> service.delete("gone123", "mallory"))
         .isInstanceOf(LinkNotFoundException.class);
+  }
+
+  // ---- cache behaviour ----
+
+  @Test
+  void createPopulatesTheCache() {
+    LinkResponse response =
+        service.create(new CreateLinkRequest("https://example.com/c", null), "alice");
+
+    assertThat(cache.entries)
+        .containsEntry(response.code(), new CacheEntry.Found("https://example.com/c"));
+  }
+
+  @Test
+  void resolveServesFromCacheWithoutTheDatabase() {
+    cache.putFound("cached1", "https://example.com/cached");
+
+    assertThat(service.resolve("cached1")).isEqualTo(URI.create("https://example.com/cached"));
+    verify(repository, never()).findByCode("cached1");
+  }
+
+  @Test
+  void resolveMissLoadsFromDbAndCachesIt() {
+    when(repository.findByCode("abcd123"))
+        .thenReturn(
+            Optional.of(Link.newGenerated(1, "abcd123", "https://example.com/x", "a", CLOCK)));
+
+    service.resolve("abcd123");
+    service.resolve("abcd123");
+
+    verify(repository, org.mockito.Mockito.times(1)).findByCode("abcd123");
+    assertThat(cache.entries)
+        .containsEntry("abcd123", new CacheEntry.Found("https://example.com/x"));
+  }
+
+  @Test
+  void unknownCodesAreNegativelyCached() {
+    assertThatThrownBy(() -> service.resolve("nope123")).isInstanceOf(LinkNotFoundException.class);
+    assertThatThrownBy(() -> service.resolve("nope123")).isInstanceOf(LinkNotFoundException.class);
+
+    verify(repository, org.mockito.Mockito.times(1)).findByCode("nope123");
+    assertThat(cache.entries).containsEntry("nope123", CacheEntry.NOT_FOUND);
+  }
+
+  @Test
+  void createdAliasOverwritesANegativeEntry() {
+    assertThatThrownBy(() -> service.resolve("fresh-alias"))
+        .isInstanceOf(LinkNotFoundException.class);
+
+    service.create(new CreateLinkRequest("https://example.com/new", "fresh-alias"), "alice");
+
+    assertThat(service.resolve("fresh-alias")).isEqualTo(URI.create("https://example.com/new"));
+  }
+
+  /**
+   * Pins the seeded defect BF-1 (docs/known-issues.md): delete does not evict, so the deleted link
+   * keeps redirecting from cache. The brownfield fix must change this test.
+   */
+  @Test
+  void knownIssueBf1_deleteDoesNotEvictCache() {
+    Link link = Link.newGenerated(1, "bf1code", "https://example.com/bf1", "alice", CLOCK);
+    when(repository.findByCode("bf1code")).thenReturn(Optional.of(link));
+    service.resolve("bf1code"); // warms the cache
+
+    service.delete("bf1code", "alice");
+
+    assertThat(service.resolve("bf1code")).isEqualTo(URI.create("https://example.com/bf1"));
+    assertThat(cache.evicted).isEmpty();
+  }
+
+  /** Plain map cache: lets service tests observe cache effects without Caffeine or Redis. */
+  static final class InMemoryLinkCache implements LinkCache {
+    final Map<String, CacheEntry> entries = new HashMap<>();
+    final List<String> evicted = new java.util.ArrayList<>();
+
+    @Override
+    public Optional<CacheEntry> get(String code) {
+      return Optional.ofNullable(entries.get(code));
+    }
+
+    @Override
+    public void putFound(String code, String originalUrl) {
+      entries.put(code, new CacheEntry.Found(originalUrl));
+    }
+
+    @Override
+    public void putNotFound(String code) {
+      entries.put(code, CacheEntry.NOT_FOUND);
+    }
+
+    @Override
+    public void evict(String code) {
+      evicted.add(code);
+      entries.remove(code);
+    }
   }
 }

@@ -21,9 +21,25 @@ public record ShortenerProperties(
     @Valid Alias alias,
     @Valid Url url,
     @DefaultValue @Valid Redirect redirect,
+    @DefaultValue @Valid Cache cache,
     @DefaultValue @Valid Idempotency idempotency) {
 
   public record Redirect(@DefaultValue("302") @Min(301) @Max(308) int status) {}
+
+  public record Cache(
+      @DefaultValue("10000") @Min(1) long l1MaxSize,
+      @DefaultValue("5m") Duration l1Ttl,
+      @DefaultValue("24h") Duration l2Ttl,
+      @DefaultValue("60s") Duration negativeTtl,
+      @DefaultValue @Valid RedisBreaker redisBreaker) {}
+
+  /** Circuit breaker around every Redis call (cache and, later, rate limiter). */
+  public record RedisBreaker(
+      @DefaultValue("20") @Min(1) int slidingWindowSize,
+      @DefaultValue("10") @Min(1) int minimumNumberOfCalls,
+      @DefaultValue("50") @Min(1) @Max(100) float failureRateThreshold,
+      @DefaultValue("10s") Duration waitDurationInOpenState,
+      @DefaultValue("3") @Min(1) int permittedCallsInHalfOpenState) {}
 
   public record Idempotency(@DefaultValue("24h") Duration ttl) {}
 

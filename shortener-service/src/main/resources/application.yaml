@@ -41,6 +41,17 @@ shortener:
   api-keys: ${SHORTENER_API_KEYS:}
   redirect:
     status: 302
+  cache:
+    l1-max-size: 10000
+    l1-ttl: 5m
+    l2-ttl: 24h
+    negative-ttl: 60s
+    redis-breaker:
+      sliding-window-size: 20
+      minimum-number-of-calls: 10
+      failure-rate-threshold: 50
+      wait-duration-in-open-state: 10s
+      permitted-calls-in-half-open-state: 3
   idempotency:
     ttl: 24h
   url:

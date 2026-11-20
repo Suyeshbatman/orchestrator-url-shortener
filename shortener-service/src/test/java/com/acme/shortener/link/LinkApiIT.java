@@ -58,6 +58,7 @@ class LinkApiIT {
   @Autowired MockMvc mvc;
   @Autowired JdbcTemplate jdbc;
   @Autowired JsonMapper json;
+  @Autowired com.acme.shortener.cache.LinkCache cache;
 
   /** Public DNS answers without the network; "internal.test" resolves to a private address. */
   @TestConfiguration
@@ -216,7 +217,7 @@ class LinkApiIT {
   }
 
   @Test
-  void deleteIsSoftIdempotentAndStopsRedirects() throws Exception {
+  void deleteIsSoftAndIdempotent() throws Exception {
     String code = createLink("https://example.com/del");
 
     mvc.perform(delete("/api/v1/links/" + code).header("X-API-Key", KEY))
@@ -224,12 +225,37 @@ class LinkApiIT {
     mvc.perform(delete("/api/v1/links/" + code).header("X-API-Key", KEY))
         .andExpect(status().isNoContent());
 
-    expectProblem(mvc.perform(get("/" + code)), 404, "link-not-found");
     mvc.perform(get("/api/v1/links/" + code).header("X-API-Key", KEY))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.status").value("DELETED"));
     assertThat(jdbc.queryForObject("SELECT count(*) FROM link WHERE code = ?", Integer.class, code))
         .isEqualTo(1);
+  }
+
+  /**
+   * Pins the seeded defect BF-1 (docs/known-issues.md): the link was cached on create and delete
+   * does not evict, so it keeps redirecting. The brownfield fix must flip this to 404.
+   */
+  @Test
+  void knownIssueBf1_deletedLinkStillRedirectsFromCache() throws Exception {
+    String code = createLink("https://example.com/bf1");
+
+    mvc.perform(delete("/api/v1/links/" + code).header("X-API-Key", KEY))
+        .andExpect(status().isNoContent());
+
+    mvc.perform(get("/" + code))
+        .andExpect(status().isFound())
+        .andExpect(header().string("Location", "https://example.com/bf1"));
+  }
+
+  @Test
+  void deletedLinkIs404OnceNotCached() throws Exception {
+    String code = createLink("https://example.com/del-cold");
+    mvc.perform(delete("/api/v1/links/" + code).header("X-API-Key", KEY))
+        .andExpect(status().isNoContent());
+    cache.evict(code); // simulate the cache entry having expired
+
+    expectProblem(mvc.perform(get("/" + code)), 404, "link-not-found");
   }
 
   @Test

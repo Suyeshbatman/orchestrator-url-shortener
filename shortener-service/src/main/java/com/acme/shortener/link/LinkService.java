@@ -1,5 +1,7 @@
 package com.acme.shortener.link;
 
+import com.acme.shortener.cache.CacheEntry;
+import com.acme.shortener.cache.LinkCache;
 import com.acme.shortener.code.AliasTakenException;
 import com.acme.shortener.code.AliasValidator;
 import com.acme.shortener.code.CodeGenerator;
@@ -10,6 +12,8 @@ import java.time.Clock;
 import java.util.Objects;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class LinkService {
@@ -21,6 +25,7 @@ public class LinkService {
   private final CodeGenerator codeGenerator;
   private final AliasValidator aliasValidator;
   private final UrlValidator urlValidator;
+  private final LinkCache cache;
   private final Clock clock;
   private final String baseUrl;
 
@@ -29,12 +34,14 @@ public class LinkService {
       CodeGenerator codeGenerator,
       AliasValidator aliasValidator,
       UrlValidator urlValidator,
+      LinkCache cache,
       Clock clock,
       ShortenerProperties properties) {
     this.links = links;
     this.codeGenerator = codeGenerator;
     this.aliasValidator = aliasValidator;
     this.urlValidator = urlValidator;
+    this.cache = cache;
     this.clock = clock;
     this.baseUrl = properties.baseUrl();
   }
@@ -46,16 +53,31 @@ public class LinkService {
         (alias == null || alias.isEmpty())
             ? createGenerated(url.toString(), owner)
             : createAlias(alias, url.toString(), owner);
+    afterCommit(() -> cache.putFound(saved.code(), saved.originalUrl()));
     return LinkResponse.of(saved, baseUrl);
   }
 
-  /** Redirect target for an active link. Public: no ownership check. */
+  /** Redirect target for an active link. Public: no ownership check. Cache, then DB. */
   public URI resolve(String code) {
+    CacheEntry entry = cache.get(code).orElseGet(() -> loadIntoCache(code));
+    return switch (entry) {
+      case CacheEntry.Found found -> URI.create(found.originalUrl());
+      case CacheEntry.NotFound notFound -> throw new LinkNotFoundException(code);
+    };
+  }
+
+  private CacheEntry loadIntoCache(String code) {
     return links
         .findByCode(code)
         .filter(Link::isActive)
-        .map(link -> URI.create(link.originalUrl()))
-        .orElseThrow(() -> new LinkNotFoundException(code));
+        .<CacheEntry>map(link -> {
+          cache.putFound(code, link.originalUrl());
+          return new CacheEntry.Found(link.originalUrl());
+        })
+        .orElseGet(() -> {
+          cache.putNotFound(code);
+          return CacheEntry.NOT_FOUND;
+        });
   }
 
   /** Metadata for the owner, including deleted links (status DELETED). */
@@ -68,6 +90,9 @@ public class LinkService {
     Link link = findOwned(code, owner);
     if (link.isActive()) {
       links.save(link.markDeleted(clock));
+      // KNOWN-ISSUE BF-1: cache not invalidated on delete. A deleted link keeps redirecting from
+      // L1/L2 until its cache TTL expires (L1 5m, L2 24h). Seeded on purpose for the brownfield
+      // scenario; see docs/known-issues.md. Do not fix outside that scenario.
     }
   }
 
@@ -103,6 +128,21 @@ public class LinkService {
       // A custom alias already uses this exact code; take the next id.
     }
     throw new IllegalStateException("could not allocate a free code");
+  }
+
+  /** Runs after the surrounding transaction commits, or now if there is none. */
+  private static void afterCommit(Runnable action) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              action.run();
+            }
+          });
+    } else {
+      action.run();
+    }
   }
 
   private static boolean isDuplicateKey(Throwable e) {
