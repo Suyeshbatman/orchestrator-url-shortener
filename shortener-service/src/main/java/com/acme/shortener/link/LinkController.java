@@ -4,6 +4,8 @@ import com.acme.shortener.auth.ApiKeyAuthInterceptor;
 import com.acme.shortener.auth.ApiKeyRegistry;
 import com.acme.shortener.idempotency.IdempotencyService;
 import com.acme.shortener.idempotency.IdempotencyService.StoredResponse;
+import com.acme.shortener.ratelimit.RateLimitScope;
+import com.acme.shortener.ratelimit.RateLimited;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -42,6 +44,7 @@ class LinkController {
   }
 
   @PostMapping
+  @RateLimited(RateLimitScope.CREATE)
   @Operation(
       summary = "Create a short link",
       description =

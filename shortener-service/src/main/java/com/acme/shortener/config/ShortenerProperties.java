@@ -22,7 +22,17 @@ public record ShortenerProperties(
     @Valid Url url,
     @DefaultValue @Valid Redirect redirect,
     @DefaultValue @Valid Cache cache,
-    @DefaultValue @Valid Idempotency idempotency) {
+    @DefaultValue @Valid Idempotency idempotency,
+    @DefaultValue @Valid RateLimit rateLimit) {
+
+  /** Token buckets: capacity is the burst, capacity/period the long-run rate. */
+  public record RateLimit(
+      @DefaultValue("true") boolean enabled,
+      @DefaultValue("60") @Min(1) long createCapacity,
+      @DefaultValue("1m") Duration createPeriod,
+      @DefaultValue("600") @Min(1) long redirectCapacity,
+      @DefaultValue("1m") Duration redirectPeriod,
+      @DefaultValue("10000") @Min(1) long localMaxKeys) {}
 
   public record Redirect(@DefaultValue("302") @Min(301) @Max(308) int status) {}
 

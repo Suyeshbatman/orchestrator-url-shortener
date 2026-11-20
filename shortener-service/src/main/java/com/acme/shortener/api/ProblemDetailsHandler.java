@@ -7,6 +7,8 @@ import com.acme.shortener.code.InvalidAliasException;
 import com.acme.shortener.idempotency.IdempotencyKeyReusedException;
 import com.acme.shortener.idempotency.InvalidIdempotencyKeyException;
 import com.acme.shortener.link.LinkNotFoundException;
+import com.acme.shortener.ratelimit.RateLimitHeaders;
+import com.acme.shortener.ratelimit.RateLimitedException;
 import com.acme.shortener.url.InvalidUrlException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
@@ -81,6 +83,15 @@ class ProblemDetailsHandler extends ResponseEntityExceptionHandler {
         ProblemTypes.IDEMPOTENCY_KEY_REUSED,
         e.getMessage(),
         request);
+  }
+
+  @ExceptionHandler(RateLimitedException.class)
+  ResponseEntity<ProblemDetail> rateLimited(RateLimitedException e, HttpServletRequest request) {
+    return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+        .headers(RateLimitHeaders.of(e.decision()))
+        .body(
+            problem(
+                HttpStatus.TOO_MANY_REQUESTS, ProblemTypes.RATE_LIMITED, e.getMessage(), request));
   }
 
   /** Last resort. Logged with the stack trace; the client never sees internals. */

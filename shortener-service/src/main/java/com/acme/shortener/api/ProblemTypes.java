@@ -18,6 +18,7 @@ public final class ProblemTypes {
   public static final Type ALIAS_TAKEN = type("alias-taken", "Alias already taken");
   public static final Type IDEMPOTENCY_KEY_REUSED =
       type("idempotency-key-reused", "Idempotency-Key reused with a different request");
+  public static final Type RATE_LIMITED = type("rate-limited", "Too many requests");
   public static final Type INTERNAL_ERROR = type("internal-error", "Internal error");
 
   private ProblemTypes() {}

@@ -1,6 +1,8 @@
 package com.acme.shortener.link;
 
 import com.acme.shortener.config.ShortenerProperties;
+import com.acme.shortener.ratelimit.RateLimitScope;
+import com.acme.shortener.ratelimit.RateLimited;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Duration;
@@ -27,6 +29,7 @@ class RedirectController {
   }
 
   @GetMapping("/{code:[A-Za-z0-9_-]{4,32}}")
+  @RateLimited(RateLimitScope.REDIRECT)
   @Operation(summary = "Redirect to the original URL")
   ResponseEntity<Void> redirect(@PathVariable String code) {
     return ResponseEntity.status(redirectStatus)

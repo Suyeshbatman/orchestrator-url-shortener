@@ -54,6 +54,14 @@ shortener:
       permitted-calls-in-half-open-state: 3
   idempotency:
     ttl: 24h
+  # Token buckets (DESIGN_RATIONALE §3.4, §5). Create: per API key; redirect: per visitor.
+  rate-limit:
+    enabled: true
+    create-capacity: 60
+    create-period: 1m
+    redirect-capacity: 600
+    redirect-period: 1m
+    local-max-keys: 10000
   url:
     max-length: 2048
     allowed-schemes: [http, https]

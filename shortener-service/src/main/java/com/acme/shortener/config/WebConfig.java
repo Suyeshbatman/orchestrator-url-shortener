@@ -2,6 +2,7 @@ package com.acme.shortener.config;
 
 import com.acme.shortener.auth.ApiKeyAuthInterceptor;
 import com.acme.shortener.auth.ApiKeyRegistry;
+import com.acme.shortener.ratelimit.RateLimitInterceptor;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
@@ -19,17 +20,28 @@ class WebConfig implements WebMvcConfigurer {
   private static final Logger log = LoggerFactory.getLogger(WebConfig.class);
 
   private final ApiKeyRegistry apiKeys;
+  private final RateLimitInterceptor rateLimits;
+  private final boolean rateLimitEnabled;
 
-  WebConfig(ShortenerProperties properties) {
+  WebConfig(ShortenerProperties properties, RateLimitInterceptor rateLimits) {
     this.apiKeys = ApiKeyRegistry.parse(properties.apiKeys());
+    this.rateLimits = rateLimits;
+    this.rateLimitEnabled = properties.rateLimit().enabled();
     if (apiKeys.size() == 0) {
       log.warn("No API keys configured (SHORTENER_API_KEYS); every /api request will get 401");
+    }
+    if (!rateLimitEnabled) {
+      log.warn("Rate limiting is disabled (shortener.rate-limit.enabled=false)");
     }
   }
 
   @Override
   public void addInterceptors(InterceptorRegistry registry) {
+    // Order matters: rate limiting keys create by the API key name that auth sets.
     registry.addInterceptor(new ApiKeyAuthInterceptor(apiKeys)).addPathPatterns("/api/**");
+    if (rateLimitEnabled) {
+      registry.addInterceptor(rateLimits); // acts only on @RateLimited handlers
+    }
   }
 
   @Bean
