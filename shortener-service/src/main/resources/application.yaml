@@ -34,3 +34,15 @@ management:
     health:
       probes:
         enabled: true
+
+shortener:
+  code:
+    length: 7
+    # Required, 32+ characters. Never commit a real value.
+    secret: ${SHORTENER_CODE_SECRET:}
+    feistel-rounds: 4
+  alias:
+    min: 4
+    max: 32
+    pattern: "^[A-Za-z0-9_-]+$"
+    reserved: [api, actuator, admin, health, swagger-ui]

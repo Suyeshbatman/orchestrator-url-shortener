@@ -1,0 +1,4 @@
+# Test-only overrides (classpath:/config/ beats classpath:/ for the same keys).
+shortener:
+  code:
+    secret: test-only-feistel-secret-0123456789abcdef

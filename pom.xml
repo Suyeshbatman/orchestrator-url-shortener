@@ -34,6 +34,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <jacoco.version>0.8.16</jacoco.version>
     <spotless.version>3.11.0</spotless.version>
+    <jqwik.version>1.10.2</jqwik.version>
   </properties>
 
   <dependencyManagement>
@@ -47,6 +48,11 @@
         <groupId>com.acme</groupId>
         <artifactId>orchestrator-agents</artifactId>
         <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>net.jqwik</groupId>
+        <artifactId>jqwik</artifactId>
+        <version>${jqwik.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

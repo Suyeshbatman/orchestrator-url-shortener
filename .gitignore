@@ -36,3 +36,6 @@ Thumbs.db
 
 # Local agent rules (kept out of git for now)
 CLAUDE.md
+
+# jqwik failure database
+.jqwik-database
