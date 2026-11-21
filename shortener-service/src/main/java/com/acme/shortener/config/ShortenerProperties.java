@@ -23,7 +23,16 @@ public record ShortenerProperties(
     @DefaultValue @Valid Redirect redirect,
     @DefaultValue @Valid Cache cache,
     @DefaultValue @Valid Idempotency idempotency,
-    @DefaultValue @Valid RateLimit rateLimit) {
+    @DefaultValue @Valid RateLimit rateLimit,
+    @DefaultValue @Valid Analytics analytics) {
+
+  /** Click pipeline (ADR-0004) and stats. */
+  public record Analytics(
+      @DefaultValue("10000") @Min(1) int queueCapacity,
+      @DefaultValue("500") @Min(1) int batchSize,
+      @DefaultValue("1s") Duration flushInterval,
+      @DefaultValue("400d") Duration hllTtl,
+      @DefaultValue("90") @Min(1) @Max(400) int maxRangeDays) {}
 
   /** Token buckets: capacity is the burst, capacity/period the long-run rate. */
   public record RateLimit(

@@ -9,3 +9,5 @@ shortener:
   rate-limit:
     create-capacity: 100000
     redirect-capacity: 100000
+  analytics:
+    flush-interval: 100ms

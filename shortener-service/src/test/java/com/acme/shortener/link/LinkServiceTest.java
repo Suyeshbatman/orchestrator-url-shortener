@@ -61,7 +61,8 @@ class LinkServiceTest {
         new AliasValidator(
             4, 32, "^[A-Za-z0-9_-]+$", Set.of("api"), repository::existsByCodeIgnoreCase);
     ShortenerProperties props =
-        new ShortenerProperties("http://sho.rt/", "", null, null, null, null, null, null, null);
+        new ShortenerProperties(
+            "http://sho.rt/", "", null, null, null, null, null, null, null, null);
     service = new LinkService(repository, codes, aliases, urls, cache, CLOCK, props);
 
     when(repository.save(any(Link.class))).thenAnswer(inv -> inv.getArgument(0));

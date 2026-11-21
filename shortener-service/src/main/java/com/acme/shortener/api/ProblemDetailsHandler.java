@@ -1,5 +1,6 @@
 package com.acme.shortener.api;
 
+import com.acme.shortener.analytics.InvalidStatsRangeException;
 import com.acme.shortener.auth.ApiKeyAuthInterceptor;
 import com.acme.shortener.auth.UnauthorizedException;
 import com.acme.shortener.code.AliasTakenException;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -85,6 +87,12 @@ class ProblemDetailsHandler extends ResponseEntityExceptionHandler {
         request);
   }
 
+  @ExceptionHandler(InvalidStatsRangeException.class)
+  ProblemDetail invalidStatsRange(InvalidStatsRangeException e, HttpServletRequest request) {
+    return problem(
+        HttpStatus.BAD_REQUEST, ProblemTypes.INVALID_STATS_RANGE, e.getMessage(), request);
+  }
+
   @ExceptionHandler(RateLimitedException.class)
   ResponseEntity<ProblemDetail> rateLimited(RateLimitedException e, HttpServletRequest request) {
     return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
@@ -142,6 +150,20 @@ class ProblemDetailsHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.BAD_REQUEST,
                 ProblemTypes.MALFORMED_REQUEST,
                 "request body is missing or is not valid JSON",
+                servletRequest(request)));
+  }
+
+  /** A query or path parameter of the wrong type, e.g. {@code ?from=yesterday}. */
+  @Override
+  protected ResponseEntity<Object> handleTypeMismatch(
+      TypeMismatchException e, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+    String name = e.getPropertyName() == null ? "parameter" : "'" + e.getPropertyName() + "'";
+    return ResponseEntity.badRequest()
+        .body(
+            problem(
+                HttpStatus.BAD_REQUEST,
+                ProblemTypes.VALIDATION_FAILED,
+                name + " has an invalid value",
                 servletRequest(request)));
   }
 

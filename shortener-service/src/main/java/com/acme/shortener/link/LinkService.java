@@ -96,7 +96,8 @@ public class LinkService {
     }
   }
 
-  private Link findOwned(String code, String owner) {
+  /** The link if {@code owner} created it, including deleted ones; otherwise 404. */
+  public Link findOwned(String code, String owner) {
     // Another key's link answers 404 too, so existence isn't revealed.
     return links
         .findByCode(code)

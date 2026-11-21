@@ -92,6 +92,42 @@ paths:
           description: OK
       security:
       - apiKey: []
+  /api/v1/links/{code}/stats:
+    get:
+      tags:
+      - Links
+      summary: Click stats for a link
+      description: "Days are UTC, both ends inclusive; the default is the last 30\
+        \ days, the maximum 90. Clicks appear about a second after the redirect. uniqueVisitors\
+        \ is approximate (HyperLogLog), and a visitor seen on two days counts twice."
+      operationId: stats
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/LinkStats"
+      security:
+      - apiKey: []
 components:
   schemas:
     CreateLinkRequest:
@@ -131,6 +167,53 @@ components:
         updatedAt:
           type: string
           format: date-time
+    DayClicks:
+      type: object
+      properties:
+        day:
+          type: string
+          format: date
+        clicks:
+          type: integer
+          format: int64
+    LinkStats:
+      type: object
+      properties:
+        code:
+          type: string
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        totalClicks:
+          type: integer
+          format: int64
+        uniqueVisitors:
+          type: integer
+          format: int64
+        clicksByDay:
+          type: array
+          items:
+            $ref: "#/components/schemas/DayClicks"
+        topReferrers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReferrerClicks"
+        byUaFamily:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+    ReferrerClicks:
+      type: object
+      properties:
+        host:
+          type: string
+        clicks:
+          type: integer
+          format: int64
   securitySchemes:
     apiKey:
       type: apiKey

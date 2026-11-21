@@ -62,6 +62,13 @@ shortener:
     redirect-capacity: 600
     redirect-period: 1m
     local-max-keys: 10000
+  # Clicks: bounded queue → batched writer (ADR-0004). Stats lag by about one flush interval.
+  analytics:
+    queue-capacity: 10000
+    batch-size: 500
+    flush-interval: 1s
+    hll-ttl: 400d
+    max-range-days: 90
   url:
     max-length: 2048
     allowed-schemes: [http, https]
