@@ -51,6 +51,7 @@ import com.acme.orchestrator.core.engine.Command.StageCompleted;
 import com.acme.orchestrator.core.engine.Command.StageFailed;
 import com.acme.orchestrator.core.engine.Command.Wake;
 import com.acme.orchestrator.core.event.Actor;
+import com.acme.orchestrator.core.event.CanonicalJson;
 import com.acme.orchestrator.core.event.Event;
 import com.acme.orchestrator.core.event.EventDraft;
 import com.acme.orchestrator.core.event.EventStore;
@@ -58,6 +59,7 @@ import com.acme.orchestrator.core.event.EventType;
 import com.acme.orchestrator.core.event.RunState;
 import com.acme.orchestrator.core.event.RunStateProjector;
 import com.acme.orchestrator.core.model.Artifact;
+import com.acme.orchestrator.core.model.ArtifactTypes;
 import com.acme.orchestrator.core.model.CheckpointKind;
 import com.acme.orchestrator.core.model.Condition;
 import com.acme.orchestrator.core.model.Executor;
@@ -79,16 +81,20 @@ import com.acme.orchestrator.core.policy.PolicyEngine;
 import com.acme.orchestrator.core.policy.PolicyMatch;
 import com.acme.orchestrator.core.policy.PolicySet;
 import com.acme.orchestrator.core.policy.ProposedAction;
+import com.acme.orchestrator.core.replan.Replanner;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -126,7 +132,10 @@ import java.util.stream.Stream;
  * grace period, checkpoints and halts. Starting a coordinator on an existing log recovers: attempts
  * that were running are retried, timers are re-armed.
  *
- * <p>Not yet: re-planning (4.5), task expansion (Phase 5).
+ * <p>Re-planning (see {@link Replanner}): an amended requirement, a rejection, or a re-run that
+ * changed an artifact invalidates what depends on it; approvals of invalidated stages are voided.
+ *
+ * <p>Not yet: task expansion (Phase 5).
  */
 public final class Coordinator implements AutoCloseable {
 
@@ -508,7 +517,7 @@ public final class Coordinator implements AutoCloseable {
       case ApprovalDecision d -> onApproval(d);
       case ApprovalTimeout t -> onApprovalTimeout(t);
       case RetryDue r -> onRetryDue(r);
-      case AmendRequirement a -> runEvent(REPLAN_TRIGGERED, a.by(), Map.of("amendment", a.text()));
+      case AmendRequirement a -> onAmend(a);
       case Halt h -> requestSafeStop(h.reason(), h.by(), false, Map.of());
       case Kill k -> requestSafeStop(k.reason(), k.by(), true, Map.of());
       case GraceExpired g -> {
@@ -708,6 +717,8 @@ public final class Coordinator implements AutoCloseable {
       return;
     }
 
+    replanIfOutputChanged(stageId, produced);
+
     Optional<String> exitFailure = evaluateGates(def, GateContext.Phase.EXIT, produced);
     if (exitFailure.isPresent()) {
       failAttempt(stageId, exitFailure.get(), FailureKind.VALIDATION, Actor.SYSTEM);
@@ -849,7 +860,15 @@ public final class Coordinator implements AutoCloseable {
 
     stageEvent(APPROVAL_REJECTED, d.stageKey(), d.approver(), payload); // → RETRYING
     restoreIfWritten(d.stageKey()); // the rejected work is discarded
-    invalidateDownstream(d.stageKey(), "upstream " + d.stageKey() + " was rejected");
+    replan(
+        "rejected",
+        List.of(d.stageKey()),
+        false,
+        "approval of " + d.stageKey() + " was rejected",
+        d.approver(),
+        Map.of("comment", d.comment()),
+        false,
+        Optional.empty());
     StageDefinition def = stages.get(d.stageKey());
     int used = current.stages().get(d.stageKey()).attempt();
     int allowed = def.retry().maxAttempts();
@@ -888,6 +907,178 @@ public final class Coordinator implements AutoCloseable {
           false,
           Map.of("stageId", t.stageKey()));
     }
+  }
+
+  // ---- re-planning ----------------------------------------------------------------------------
+
+  /**
+   * Trigger (a): stores the amended requirement as a new {@code requirement} version (derived from
+   * the previous one, so both stay in the lineage) and re-runs the stages that read it, plus
+   * everything downstream. If nothing has read it yet, the workflow's first stages re-run.
+   */
+  private void onAmend(AmendRequirement a) {
+    if (current.run().status().isTerminal()) {
+      LOG.log(System.Logger.Level.WARNING, "ignored amendment: run {0} is finished", runId);
+      return;
+    }
+    Optional<Artifact> previous =
+        services.artifacts().latestOfType(runId, ArtifactTypes.REQUIREMENT);
+    Artifact amended =
+        services
+            .artifacts()
+            .save(
+                new ArtifactDraft(
+                    runId,
+                    ArtifactTypes.INPUT_STAGE,
+                    ArtifactTypes.REQUIREMENT,
+                    CanonicalJson.write(Map.of("text", a.text())),
+                    ProducedBy.deterministic(a.by().toString()),
+                    previous.map(Artifact::ref).stream().toList(),
+                    "amended requirement"));
+    runEvent(ARTIFACT_PRODUCED, a.by(), refPayload(amended));
+
+    Set<String> readers = new LinkedHashSet<>();
+    for (Artifact artifact : services.artifacts().byRun(runId)) {
+      if (stages.containsKey(artifact.stageId())
+          && artifact.inputs().stream().anyMatch(r -> r.type().equals(ArtifactTypes.REQUIREMENT))) {
+        readers.add(artifact.stageId());
+      }
+    }
+    if (readers.isEmpty()) {
+      dag.nodes().stream().filter(n -> dag.dependenciesOf(n).isEmpty()).forEach(readers::add);
+    }
+    Map<String, Object> details = new LinkedHashMap<>();
+    details.put("amendment", a.text());
+    previous.ifPresent(p -> details.put("before", refPayload(p)));
+    details.put("after", refPayload(amended));
+    replan(
+        "amendment",
+        readers,
+        true,
+        "the requirement was amended",
+        a.by(),
+        details,
+        true,
+        Optional.of("requirement amended by " + a.by() + ": " + a.text()));
+  }
+
+  /**
+   * Trigger (c): a re-run produced different content than the version downstream stages used, so
+   * they must run again. (No rollback: that would undo what this stage just wrote.)
+   */
+  private void replanIfOutputChanged(String stageId, List<Artifact> produced) {
+    List<Map<String, Object>> changes = new ArrayList<>();
+    for (Artifact a : produced) {
+      if (a.version() > 1) {
+        Artifact before =
+            services.artifacts().versions(runId, stageId, a.type()).get(a.version() - 2);
+        if (!before.contentHash().equals(a.contentHash())) {
+          changes.add(
+              Map.of("type", a.type(), "before", refPayload(before), "after", refPayload(a)));
+        }
+      }
+    }
+    if (!changes.isEmpty()) {
+      replan(
+          "artifact-changed",
+          List.of(stageId),
+          false,
+          stageId + " produced different output",
+          Actor.SYSTEM,
+          Map.of("changes", changes),
+          false,
+          Optional.empty());
+    }
+  }
+
+  /**
+   * Invalidates {@link Replanner#affected} stages: records REPLAN_TRIGGERED (what changed, with
+   * before/after hashes, what is invalidated, which approvals are voided), optionally restores the
+   * checkpoint of the earliest invalidated stage, then emits STAGE_INVALIDATED for each (in-flight
+   * attempts become stale). The scheduler re-runs them as they become ready; voided approvals must
+   * be given again.
+   *
+   * @param alwaysRecord record REPLAN_TRIGGERED even when nothing is invalidated (amendments)
+   * @param feedback for the changed stages' next attempt
+   */
+  private void replan(
+      String trigger,
+      Collection<String> changed,
+      boolean alwaysRecord,
+      String reason,
+      Actor by,
+      Map<String, ?> details,
+      boolean rollback,
+      Optional<String> feedback) {
+    boolean includeChanged = trigger.equals("amendment");
+    List<String> affected = Replanner.affected(dag, current.statuses(), changed, includeChanged);
+    if (affected.isEmpty() && !alwaysRecord) {
+      return;
+    }
+    List<String> voided = affected.stream().filter(this::approvalStands).toList();
+    Optional<CheckpointRef> checkpoint =
+        rollback
+            ? affected.stream().map(this::latestCheckpoint).flatMap(Optional::stream).findFirst()
+            : Optional.empty();
+
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("trigger", trigger);
+    payload.put("reason", reason);
+    payload.put("changed", List.copyOf(changed));
+    payload.put("invalidated", affected);
+    payload.put("voidedApprovals", voided);
+    payload.putAll(details);
+    checkpoint.ifPresent(c -> payload.put("restoredCheckpoint", c.id()));
+    runEvent(REPLAN_TRIGGERED, by, payload);
+    long replan = current.lastSeq();
+
+    checkpoint.ifPresent(c -> services.checkpoints().restore(c));
+    for (String key : affected) {
+      inFlight.remove(key);
+      Future<?> task = running.remove(key);
+      if (task != null) {
+        task.cancel(true);
+      }
+      approvalRequests.remove(key);
+      retryTimers.remove(key);
+      Map<String, Object> invalidation = new LinkedHashMap<>();
+      invalidation.put("reason", reason);
+      invalidation.put("trigger", trigger);
+      invalidation.put("replan", replan);
+      if (voided.contains(key)) {
+        invalidation.put("approvalVoided", true);
+      }
+      if (changed.contains(key)) {
+        feedback.ifPresent(f -> invalidation.put("feedback", f));
+      }
+      stageEvent(STAGE_INVALIDATED, key, Actor.SYSTEM, invalidation);
+    }
+  }
+
+  /** Whether the stage's current result rests on a human approval (voided if it is invalidated). */
+  private boolean approvalStands(String stageKey) {
+    if (statusOf(stageKey) != StageStatus.SUCCEEDED) {
+      return false;
+    }
+    List<Event> events = stageEvents(stageKey);
+    for (int i = events.size() - 1; i >= 0; i--) {
+      EventType type = events.get(i).type();
+      if (type == APPROVAL_GRANTED) {
+        return true;
+      }
+      if (type == STAGE_READY) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private static Map<String, Object> refPayload(Artifact a) {
+    return Map.of(
+        "artifactId", a.id(),
+        "type", a.type(),
+        "version", a.version(),
+        "contentHash", a.contentHash());
   }
 
   // ---- safe stop, budgets, rollback -----------------------------------------------------------

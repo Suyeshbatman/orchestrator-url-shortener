@@ -6,6 +6,9 @@ public final class ArtifactTypes {
   /** The requirement as given ({@code {"text": "..."}}), stored before the run starts. */
   public static final String REQUIREMENT = "requirement";
 
+  /** The stage id requirement artifacts are stored under (it is not a workflow stage). */
+  public static final String INPUT_STAGE = "input";
+
   public static final String REQUIREMENTS_SPEC = "requirements_spec";
   public static final String TASK_GRAPH = "task_graph";
   public static final String IMPACT_REPORT = "impact_report";
