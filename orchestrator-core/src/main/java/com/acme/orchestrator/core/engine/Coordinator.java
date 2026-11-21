@@ -44,6 +44,7 @@ import com.acme.orchestrator.core.engine.Command.BudgetCheck;
 import com.acme.orchestrator.core.engine.Command.GraceExpired;
 import com.acme.orchestrator.core.engine.Command.Halt;
 import com.acme.orchestrator.core.engine.Command.Kill;
+import com.acme.orchestrator.core.engine.Command.ProvideAnswers;
 import com.acme.orchestrator.core.engine.Command.Resume;
 import com.acme.orchestrator.core.engine.Command.RetryDue;
 import com.acme.orchestrator.core.engine.Command.Rollback;
@@ -59,6 +60,7 @@ import com.acme.orchestrator.core.event.EventType;
 import com.acme.orchestrator.core.event.RunState;
 import com.acme.orchestrator.core.event.RunStateProjector;
 import com.acme.orchestrator.core.model.Artifact;
+import com.acme.orchestrator.core.model.ArtifactRef;
 import com.acme.orchestrator.core.model.ArtifactTypes;
 import com.acme.orchestrator.core.model.CheckpointKind;
 import com.acme.orchestrator.core.model.Condition;
@@ -518,6 +520,7 @@ public final class Coordinator implements AutoCloseable {
       case ApprovalTimeout t -> onApprovalTimeout(t);
       case RetryDue r -> onRetryDue(r);
       case AmendRequirement a -> onAmend(a);
+      case ProvideAnswers a -> onAnswers(a);
       case Halt h -> requestSafeStop(h.reason(), h.by(), false, Map.of());
       case Kill k -> requestSafeStop(k.reason(), k.by(), true, Map.of());
       case GraceExpired g -> {
@@ -589,7 +592,8 @@ public final class Coordinator implements AutoCloseable {
       stageEvent(STAGE_SKIPPED, stageId, Actor.SYSTEM, Map.of("condition", def.condition().get()));
       return;
     }
-    Optional<String> entryFailure = evaluateGates(def, GateContext.Phase.ENTRY, List.of());
+    Optional<String> entryFailure =
+        evaluateGates(def, GateContext.Phase.ENTRY, List.of()).failure();
     if (entryFailure.isPresent()) {
       // the inputs are what they are: retrying the stage can't help
       failAttempt(stageId, entryFailure.get(), FailureKind.FATAL, Actor.SYSTEM);
@@ -757,12 +761,18 @@ public final class Coordinator implements AutoCloseable {
 
     replanIfOutputChanged(stageId, produced);
 
-    Optional<String> exitFailure = evaluateGates(def, GateContext.Phase.EXIT, produced);
-    if (exitFailure.isPresent()) {
-      failAttempt(stageId, exitFailure.get(), FailureKind.VALIDATION, Actor.SYSTEM);
+    GateOutcome exit = evaluateGates(def, GateContext.Phase.EXIT, produced);
+    OptionalInt risk = stageRisk(c);
+    if (exit.failure().isPresent() && exit.needsInput()) {
+      // e.g. blocking questions: a human answers them (re-run) or accepts the defaults (approve)
+      requestApproval(
+          def, List.of("human input needed: " + exit.failure().get()), c, produced, risk, true);
       return;
     }
-    OptionalInt risk = stageRisk(c);
+    if (exit.failure().isPresent()) {
+      failAttempt(stageId, exit.failure().get(), FailureKind.VALIDATION, Actor.SYSTEM);
+      return;
+    }
     List<String> reasons = new ArrayList<>();
     if (!approvedBeforeRunning(def)
         && services.policies().stageApprovalRequired(def, current.run().autonomyLevel(), risk)) {
@@ -783,7 +793,7 @@ public final class Coordinator implements AutoCloseable {
     if (reasons.isEmpty()) {
       stageEvent(STAGE_SUCCEEDED, stageId, actorOf(def), Map.of("summary", c.result().summary()));
     } else {
-      requestApproval(def, reasons, c, produced, risk);
+      requestApproval(def, reasons, c, produced, risk, false);
     }
   }
 
@@ -797,9 +807,13 @@ public final class Coordinator implements AutoCloseable {
       List<String> reasons,
       StageCompleted c,
       List<Artifact> produced,
-      OptionalInt risk) {
+      OptionalInt risk,
+      boolean needsInput) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("reason", String.join("; ", reasons));
+    if (needsInput) {
+      payload.put("needsInput", true);
+    }
     payload.put("summary", c.result().summary());
     payload.put("artifacts", produced.stream().map(Artifact::id).toList());
     payload.put(
@@ -1015,6 +1029,52 @@ public final class Coordinator implements AutoCloseable {
   }
 
   /**
+   * Answers to the spec's open questions: stored as an {@code answers} artifact (derived from the
+   * previous answers and the spec they answer) and the stage that wrote the spec re-runs with them.
+   */
+  private void onAnswers(ProvideAnswers a) {
+    if (current.run().status().isTerminal()) {
+      LOG.log(System.Logger.Level.WARNING, "ignored answers: run {0} is finished", runId);
+      return;
+    }
+    Optional<Artifact> spec =
+        services.artifacts().latestOfType(runId, ArtifactTypes.REQUIREMENTS_SPEC);
+    List<ArtifactRef> inputs = new ArrayList<>();
+    services
+        .artifacts()
+        .latestOfType(runId, ArtifactTypes.ANSWERS)
+        .ifPresent(p -> inputs.add(p.ref()));
+    spec.ifPresent(s -> inputs.add(s.ref()));
+    Artifact answers =
+        services
+            .artifacts()
+            .save(
+                new ArtifactDraft(
+                    runId,
+                    ArtifactTypes.INPUT_STAGE,
+                    ArtifactTypes.ANSWERS,
+                    a.answersJson(),
+                    ProducedBy.deterministic(a.by().toString()),
+                    inputs,
+                    "answers to the open questions"));
+    runEvent(ARTIFACT_PRODUCED, a.by(), refPayload(answers));
+    List<String> writers =
+        spec.filter(s -> stages.containsKey(s.stageId()))
+            .map(s -> List.of(s.stageId()))
+            .orElseGet(
+                () -> dag.nodes().stream().filter(n -> dag.dependenciesOf(n).isEmpty()).toList());
+    replan(
+        "answers",
+        writers,
+        true,
+        "answers to the open questions were given",
+        a.by(),
+        Map.of("answers", refPayload(answers)),
+        true,
+        Optional.of("answers to the open questions were given by " + a.by() + ": apply them"));
+  }
+
+  /**
    * Trigger (c): a re-run produced different content than the version downstream stages used, so
    * they must run again. (No rollback: that would undo what this stage just wrote.)
    */
@@ -1062,7 +1122,7 @@ public final class Coordinator implements AutoCloseable {
       Map<String, ?> details,
       boolean rollback,
       Optional<String> feedback) {
-    boolean includeChanged = trigger.equals("amendment");
+    boolean includeChanged = trigger.equals("amendment") || trigger.equals("answers");
     List<String> affected = Replanner.affected(dag, current.statuses(), changed, includeChanged);
     if (affected.isEmpty() && !alwaysRecord) {
       return;
@@ -1568,8 +1628,11 @@ public final class Coordinator implements AutoCloseable {
 
   // ---- helpers ------------------------------------------------------------------------------
 
-  /** Evaluates every gate (each emits GATE_EVALUATED); returns the failure reasons, if any. */
-  private Optional<String> evaluateGates(
+  /** The failure reasons, if any; {@code needsInput} when every failed gate waits for a human. */
+  private record GateOutcome(Optional<String> failure, boolean needsInput) {}
+
+  /** Evaluates every gate (each emits GATE_EVALUATED). */
+  private GateOutcome evaluateGates(
       StageDefinition def, GateContext.Phase phase, List<Artifact> produced) {
     List<GateRef> gates = phase == GateContext.Phase.ENTRY ? def.entryGates() : def.exitGates();
     GateContext context =
@@ -1580,6 +1643,7 @@ public final class Coordinator implements AutoCloseable {
             produced,
             type -> services.artifacts().latestOfType(runId, type));
     List<String> failures = new ArrayList<>();
+    boolean allNeedInput = true;
     for (GateRef gate : gates) {
       GateResult result;
       try {
@@ -1595,8 +1659,10 @@ public final class Coordinator implements AutoCloseable {
               "gate", gate.toString(),
               "phase", phase,
               "passed", result.passed(),
-              "reasons", result.reasons()));
+              "reasons", result.reasons(),
+              "needsInput", result.needsInput()));
       if (!result.passed()) {
+        allNeedInput &= result.needsInput();
         failures.add(
             phase.name().toLowerCase(Locale.ROOT)
                 + " gate "
@@ -1605,7 +1671,9 @@ public final class Coordinator implements AutoCloseable {
                 + String.join("; ", result.reasons()));
       }
     }
-    return failures.isEmpty() ? Optional.empty() : Optional.of(String.join(" | ", failures));
+    return failures.isEmpty()
+        ? new GateOutcome(Optional.empty(), false)
+        : new GateOutcome(Optional.of(String.join(" | ", failures)), allNeedInput);
   }
 
   /** Runs on a worker thread. */

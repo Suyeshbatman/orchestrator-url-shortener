@@ -99,6 +99,17 @@ public sealed interface Command {
     }
   }
 
+  /**
+   * A human's answers to the spec's open questions ({@code {"answers": [{ambiguityId, answer}]}}):
+   * stored as an {@code answers} artifact; the requirements stage re-runs with them.
+   */
+  record ProvideAnswers(String answersJson, Actor by) implements Command {
+    public ProvideAnswers {
+      Objects.requireNonNull(answersJson, "answersJson");
+      Objects.requireNonNull(by, "by");
+    }
+  }
+
   /** Kill switch: a safe stop without the grace period (running attempts are cancelled now). */
   record Kill(String reason, Actor by) implements Command {
     public Kill {

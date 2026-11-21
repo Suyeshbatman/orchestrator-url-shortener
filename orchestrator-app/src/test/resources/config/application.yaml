@@ -1,0 +1,7 @@
+# Test-only overrides (classpath:/config/ beats classpath:/ and the ../.env import for the same keys),
+# so tests never depend on a developer's local .env. Tests that need keys set their own.
+orchestrator:
+  operator-keys: ""
+  approver-keys: ""
+  data-dir: target/orchestrator-data
+  workspace-root: target/agent-worktrees

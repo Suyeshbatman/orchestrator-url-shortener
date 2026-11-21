@@ -125,7 +125,7 @@ final class StandardGates {
       List<String> reasons = new ArrayList<>();
       reasons.add(blocking.size() + " blocking question(s) need an answer");
       reasons.addAll(limit(blocking));
-      return new GateResult(false, reasons);
+      return GateResult.needsInput(reasons); // a human answers them (or accepts the defaults)
     }
     return GateResult.pass("no blocking questions (" + nonBlocking + " non-blocking)");
   }

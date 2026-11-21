@@ -65,6 +65,10 @@ class ApprovalFlowTest {
   }
 
   private void start(WorkflowDefinition wf, AutonomyLevel level, Agent agent) {
+    start(wf, level, agent, GateEvaluator.PASS_ALL);
+  }
+
+  private void start(WorkflowDefinition wf, AutonomyLevel level, Agent agent, GateEvaluator gates) {
     coordinator =
         Coordinator.start(
             wf,
@@ -73,7 +77,7 @@ class ApprovalFlowTest {
                 events,
                 artifacts,
                 AgentRegistry.of(Map.of("A", agent, "git.mergeToMain", agent)),
-                GateEvaluator.PASS_ALL,
+                gates,
                 ToolRegistry.EMPTY,
                 POLICIES));
   }
@@ -444,5 +448,90 @@ class ApprovalFlowTest {
     assertThat(ofType(EventType.STAGE_FAILED).getFirst().payload())
         .containsEntry(
             "reason", "rejected by human:alice before it ran: no-go: wait for the freeze to end");
+  }
+
+  // ---- blocking questions: a human answers -----------------------------------------------------
+
+  private static final String QUESTIONS =
+      """
+        - id: requirements
+          agent: A
+          exitGates: [spec.noBlockingQuestions]
+        - id: design
+          agent: A
+          dependsOn: [requirements]
+      """;
+
+  /** Asks a blocking question until it has answers. */
+  private static Agent analyst(java.util.concurrent.atomic.AtomicInteger calls) {
+    return ctx -> {
+      if (ctx.stageKey().equals("requirements")) {
+        calls.incrementAndGet();
+        boolean answered = ctx.artifact("answers").isPresent();
+        String spec =
+            answered
+                ? "{\"ambiguities\":[]}"
+                : "{\"ambiguities\":[{\"id\":\"AMB-1\",\"question\":\"Block or flag?\","
+                    + "\"severity\":\"BLOCKING\"}]}";
+        return AgentResult.success("spec", ArtifactOutput.of("requirements_spec", spec, "test"));
+      }
+      return AgentResult.success("design", ArtifactOutput.of("design_doc", "{}", "test"));
+    };
+  }
+
+  @Test
+  void blockingQuestionsWaitForAHumanAndTheAnswersReRunTheRequirements() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger calls =
+        new java.util.concurrent.atomic.AtomicInteger();
+    start(
+        workflow(QUESTIONS),
+        AutonomyLevel.L1_SUPERVISED,
+        analyst(calls),
+        com.acme.orchestrator.core.gate.GateRegistry.standard(
+            com.acme.orchestrator.core.gate.SchemaValidator.STRUCTURE_ONLY));
+
+    RunState waiting = awaitStatus(RunStatus.AWAITING_HUMAN);
+    assertThat(waiting.statuses()).containsEntry("requirements", StageStatus.WAITING_APPROVAL);
+    assertThat(ofType(EventType.STAGE_RETRIED)).isEmpty(); // no point asking the agent again
+    assertThat(ofType(EventType.APPROVAL_REQUESTED).getFirst().payload())
+        .containsEntry("needsInput", true)
+        .extractingByKey("reason")
+        .asString()
+        .contains("human input needed")
+        .contains("AMB-1: Block or flag?");
+
+    coordinator.submit(
+        new Command.ProvideAnswers(
+            "{\"answers\":[{\"ambiguityId\":\"AMB-1\",\"answer\":\"block\"}]}", ALICE));
+    awaitStatus(RunStatus.COMPLETED);
+
+    assertThat(calls).hasValue(2);
+    assertThat(ofType(EventType.REPLAN_TRIGGERED).getFirst().payload())
+        .containsEntry("trigger", "answers")
+        .containsEntry("invalidated", List.of("requirements"));
+    assertThat(ofType(EventType.APPROVAL_REQUESTED)).hasSize(1);
+    var answers = artifacts.latestOfType("run-1", "answers").orElseThrow();
+    assertThat(answers.inputs()).extracting(r -> r.type()).containsExactly("requirements_spec");
+    var specV2 = artifacts.latestOfType("run-1", "requirements_spec").orElseThrow();
+    assertThat(specV2.version()).isEqualTo(2);
+    assertThat(specV2.inputs()).extracting(r -> r.artifactId()).contains(answers.id()); // lineage
+  }
+
+  @Test
+  void approvingInsteadOfAnsweringAcceptsTheProposedDefaults() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger calls =
+        new java.util.concurrent.atomic.AtomicInteger();
+    start(
+        workflow(QUESTIONS),
+        AutonomyLevel.L1_SUPERVISED,
+        analyst(calls),
+        com.acme.orchestrator.core.gate.GateRegistry.standard(
+            com.acme.orchestrator.core.gate.SchemaValidator.STRUCTURE_ONLY));
+    awaitStatus(RunStatus.AWAITING_HUMAN);
+
+    decide("requirements", ALICE, APPROVER, Decision.APPROVE, "use the defaults");
+    awaitStatus(RunStatus.COMPLETED);
+
+    assertThat(calls).hasValue(1);
   }
 }

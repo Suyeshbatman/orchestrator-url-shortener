@@ -14,20 +14,43 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param workspaceRoot one Git clone per run
  * @param sourceRepo what runs clone and publish to (a path or URI; publish needs it bare or remote)
  * @param recoverOnStartup resume unfinished runs when the app starts
+ * @param operatorKeys {@code name:sha256hex(key)}, comma-separated: may start and steer runs
+ * @param approverKeys same format: may decide approvals (a person can be in both lists)
  */
 @ConfigurationProperties("orchestrator")
 public record OrchestratorProperties(
-    @DefaultValue("../config") Path configDir,
-    @DefaultValue("../scenarios") Path scenariosDir,
-    @DefaultValue("../.orchestrator") Path dataDir,
-    @DefaultValue("../.agent-worktrees") Path workspaceRoot,
+    @DefaultValue("../config") String configDir,
+    @DefaultValue("../scenarios") String scenariosDir,
+    @DefaultValue("../.orchestrator") String dataDir,
+    @DefaultValue("../.agent-worktrees") String workspaceRoot,
     @DefaultValue("..") String sourceRepo,
     @DefaultValue("main") String baseBranch,
     @DefaultValue("true") boolean recoverOnStartup,
-    @DefaultValue("30s") Duration safeStopGrace) {
+    @DefaultValue("30s") Duration safeStopGrace,
+    @DefaultValue("") String operatorKeys,
+    @DefaultValue("") String approverKeys) {
+
+  // Directories are bound as text and resolved against the file system here: Spring's own Path
+  // conversion would also look on the classpath, where a "config" folder may exist.
+
+  public Path configPath() {
+    return Path.of(configDir);
+  }
 
   public Path workflowsDir() {
-    return configDir.resolve("workflows");
+    return configPath().resolve("workflows");
+  }
+
+  public Path scenariosPath() {
+    return Path.of(scenariosDir);
+  }
+
+  public Path dataPath() {
+    return Path.of(dataDir);
+  }
+
+  public Path workspacePath() {
+    return Path.of(workspaceRoot);
   }
 
   /** A path becomes a file URI; anything with a scheme (https://, ssh://, file:) is used as is. */

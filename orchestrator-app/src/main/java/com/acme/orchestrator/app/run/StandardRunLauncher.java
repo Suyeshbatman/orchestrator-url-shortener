@@ -78,8 +78,8 @@ public final class StandardRunLauncher implements RunLauncher {
     Workspace workspace = workspaces.create(run.id());
     Path replay =
         row.scenarioId()
-            .map(id -> props.scenariosDir().resolve(id).resolve("replay"))
-            .orElse(props.dataDir().resolve("runs").resolve(run.id()).resolve("replay"));
+            .map(id -> props.scenariosPath().resolve(id).resolve("replay"))
+            .orElse(props.dataPath().resolve("runs").resolve(run.id()).resolve("replay"));
     LlmGateway llm =
         LlmGateways.create(
             LlmGateways.Config.fromEnvironment(environment, replay),

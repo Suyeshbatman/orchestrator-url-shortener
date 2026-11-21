@@ -2,6 +2,7 @@ package com.acme.orchestrator.app.config;
 
 import com.acme.orchestrator.agents.llm.JsonSchemas;
 import com.acme.orchestrator.agents.tools.WorkspaceManager;
+import com.acme.orchestrator.app.persistence.ApprovalRepository;
 import com.acme.orchestrator.app.persistence.JdbcArtifactStore;
 import com.acme.orchestrator.app.persistence.JdbcEventStore;
 import com.acme.orchestrator.app.persistence.RunProjections;
@@ -10,6 +11,7 @@ import com.acme.orchestrator.app.run.ActiveRuns;
 import com.acme.orchestrator.app.run.OrchestratorProperties;
 import com.acme.orchestrator.app.run.RunLauncher;
 import com.acme.orchestrator.app.run.RunRecovery;
+import com.acme.orchestrator.app.run.RunService;
 import com.acme.orchestrator.app.run.StandardRunLauncher;
 import com.acme.orchestrator.core.artifact.ArtifactStore;
 import com.acme.orchestrator.core.event.EventStore;
@@ -55,7 +57,7 @@ class OrchestratorConfiguration {
   /** Loaded once; each run's RUN_CREATED records the hashes, so edits only affect new runs. */
   @Bean
   PolicyEngine policyEngine(OrchestratorProperties props) {
-    return PolicyEngine.load(props.configDir());
+    return PolicyEngine.load(props.configPath());
   }
 
   @Bean
@@ -70,7 +72,7 @@ class OrchestratorConfiguration {
 
   @Bean
   WorkspaceManager workspaceManager(OrchestratorProperties props) {
-    return new WorkspaceManager(props.sourceUri(), props.workspaceRoot(), props.baseBranch());
+    return new WorkspaceManager(props.sourceUri(), props.workspacePath(), props.baseBranch());
   }
 
   @Bean(destroyMethod = "close")
@@ -100,6 +102,24 @@ class OrchestratorConfiguration {
         System.getenv(),
         clock,
         active);
+  }
+
+  @Bean
+  ApprovalRepository approvalRepository(JdbcClient jdbc) {
+    return new ApprovalRepository(jdbc);
+  }
+
+  @Bean
+  RunService runService(
+      OrchestratorProperties props,
+      RunRepository runs,
+      ApprovalRepository approvals,
+      EventStore events,
+      ArtifactStore artifacts,
+      RunLauncher launcher,
+      ActiveRuns active,
+      GateRegistry gates) {
+    return new RunService(props, runs, approvals, events, artifacts, launcher, active, gates);
   }
 
   @Bean

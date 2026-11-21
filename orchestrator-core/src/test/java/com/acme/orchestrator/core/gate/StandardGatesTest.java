@@ -172,7 +172,9 @@ class StandardGatesTest {
           {"id": "A2", "question": "Log blocked attempts?", "severity": "NONBLOCKING"}]}
         """);
     assertThat(eval("spec.noBlockingQuestions"))
-        .isEqualTo(failed("1 blocking question(s) need an answer", "A1: Who counts as an abuser?"));
+        .isEqualTo(
+            GateResult.needsInput( // a human answers: retrying the agent can't
+                List.of("1 blocking question(s) need an answer", "A1: Who counts as an abuser?")));
 
     produced(
         "requirements_spec",

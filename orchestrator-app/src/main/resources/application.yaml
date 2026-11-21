@@ -29,6 +29,9 @@ orchestrator:
   base-branch: ${ORCH_BASE_BRANCH:main}
   recover-on-startup: true
   safe-stop-grace: 30s
+  # API keys, name:sha256(key) comma-separated. Operators steer runs, approvers decide approvals.
+  operator-keys: ${ORCH_OPERATOR_KEYS:}
+  approver-keys: ${ORCH_APPROVER_KEYS:}
 
 management:
   endpoints:
