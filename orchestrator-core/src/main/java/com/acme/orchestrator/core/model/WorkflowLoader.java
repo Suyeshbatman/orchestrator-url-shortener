@@ -66,7 +66,7 @@ public final class WorkflowLoader {
           "expand",
           "highImpact",
           "timeout");
-  private static final Set<String> APPROVAL_KEYS = Set.of("required", "reason");
+  private static final Set<String> APPROVAL_KEYS = Set.of("required", "reason", "timeout");
   private static final Set<String> FALLBACK_KEYS = Set.of("strategy");
   private static final Set<String> ON_FAILURE_KEYS = Set.of("loopTo", "maxLoops", "feedback");
 
@@ -268,7 +268,11 @@ public final class WorkflowLoader {
     p.unknownKeys(path, node, APPROVAL_KEYS);
     boolean required = bool(node, "required", path, p, false);
     String reason = string(node, "reason", path, p, false);
-    Approval a = p.attempt(path, () -> new Approval(required, reason));
+    Optional<Duration> timeout =
+        node.has("timeout")
+            ? Optional.ofNullable(duration(node, "timeout", path, p, null))
+            : Optional.empty();
+    Approval a = p.attempt(path, () -> new Approval(required, reason, timeout));
     return a == null ? Approval.NONE : a;
   }
 
@@ -506,6 +510,7 @@ public final class WorkflowLoader {
         };
     if (d.isZero()) {
       p.add(join(path, key), "must be greater than zero");
+      return dflt;
     }
     return d;
   }

@@ -4,6 +4,7 @@ import com.acme.orchestrator.core.event.Actor;
 import com.acme.orchestrator.core.model.ArtifactRef;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalInt;
 
 /**
  * Messages to the coordinator. Workers and humans only ever send these; the coordinator thread is
@@ -14,28 +15,46 @@ public sealed interface Command {
   /**
    * An agent finished an attempt. {@code dispatch} identifies the attempt (the seq of its
    * STAGE_STARTED event), so a late result from a halted or timed-out attempt is never mistaken for
-   * the current one. {@code reads} becomes the lineage of what it produced.
+   * the current one. {@code reads} becomes the lineage of what it produced; {@code checks} are its
+   * policy checks; {@code reportedRisk} its own risk assessment, if any.
    */
   record StageCompleted(
-      String stageKey, long dispatch, AgentResult.Success result, List<ArtifactRef> reads)
+      String stageKey,
+      long dispatch,
+      AgentResult.Success result,
+      List<ArtifactRef> reads,
+      List<PolicyCheck> checks,
+      OptionalInt reportedRisk)
       implements Command {
     public StageCompleted {
       Objects.requireNonNull(stageKey, "stageKey");
       Objects.requireNonNull(result, "result");
       reads = List.copyOf(reads);
+      checks = List.copyOf(checks);
+      Objects.requireNonNull(reportedRisk, "reportedRisk");
     }
   }
 
   /** An attempt failed: the agent said so, threw, or timed out. */
-  record StageFailed(String stageKey, long dispatch, String reason) implements Command {
+  record StageFailed(String stageKey, long dispatch, String reason, List<PolicyCheck> checks)
+      implements Command {
     public StageFailed {
       Objects.requireNonNull(stageKey, "stageKey");
       Objects.requireNonNull(reason, "reason");
+      checks = List.copyOf(checks);
     }
   }
 
-  record ApprovalDecision(String stageKey, Actor approver, Decision decision, String comment)
+  /**
+   * A human's verdict on a stage waiting for approval. Only counts when {@code approver} is a human
+   * and {@code role} is {@link #APPROVER}; the app authenticates both before sending this.
+   */
+  record ApprovalDecision(
+      String stageKey, Actor approver, String role, Decision decision, String comment)
       implements Command {
+
+    public static final String APPROVER = "APPROVER";
+
     public enum Decision {
       APPROVE,
       REJECT
@@ -44,6 +63,7 @@ public sealed interface Command {
     public ApprovalDecision {
       Objects.requireNonNull(stageKey, "stageKey");
       Objects.requireNonNull(approver, "approver");
+      role = role == null ? "" : role;
       Objects.requireNonNull(decision, "decision");
       comment = comment == null ? "" : comment;
     }
@@ -69,6 +89,16 @@ public sealed interface Command {
   record Resume(Actor by) implements Command {
     public Resume {
       Objects.requireNonNull(by, "by");
+    }
+  }
+
+  /**
+   * Internal: an approval's timeout elapsed. {@code request} is the seq of its APPROVAL_REQUESTED,
+   * so a timer from an earlier request can't halt a later one.
+   */
+  record ApprovalTimeout(String stageKey, long request) implements Command {
+    public ApprovalTimeout {
+      Objects.requireNonNull(stageKey, "stageKey");
     }
   }
 

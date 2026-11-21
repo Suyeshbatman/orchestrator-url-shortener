@@ -255,6 +255,34 @@ class WorkflowLoaderTest {
         .hasMessageContaining("- workflow: is required");
   }
 
+  @Test
+  void approvalsMayHaveATimeout() {
+    WorkflowDefinition wf =
+        loader.parse(
+            stages(
+                "  - id: a\n    agent: A\n"
+                    + "    approval: { required: true, reason: r, timeout: 2h }\n"),
+            "test.yml");
+
+    assertThat(wf.stage("a").orElseThrow().approval())
+        .isEqualTo(new Approval(true, "r", Optional.of(Duration.ofHours(2))));
+    assertThat(loader.load(STANDARD).stage("design").orElseThrow().approval().timeout()).isEmpty();
+    assertThat(
+            problems(
+                stages(
+                    "  - id: a\n    agent: A\n"
+                        + "    approval: { required: true, reason: r, timeout: 0s }\n")))
+        .containsExactly("stages[0] (a).approval.timeout: must be greater than zero");
+    assertThat(
+            problems(
+                stages(
+                    "  - id: a\n    agent: A\n"
+                        + "    approval: { required: true, reason: r, timeout: soon }\n")))
+        .singleElement()
+        .asString()
+        .startsWith("stages[0] (a).approval.timeout: must be a duration");
+  }
+
   private List<String> problems(String yaml) {
     try {
       loader.parse(yaml, "test.yml");

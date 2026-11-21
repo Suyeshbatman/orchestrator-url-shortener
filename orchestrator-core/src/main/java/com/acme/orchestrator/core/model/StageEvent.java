@@ -11,6 +11,9 @@ public enum StageEvent {
   /** Exit gates passed and the stage needs human approval. */
   AWAIT_APPROVAL,
   APPROVE,
+  /**
+   * A human rejected the work: the stage re-runs with the comment as feedback (if attempts remain).
+   */
   REJECT,
   /** Exit gates passed and no approval is needed. */
   SUCCEED,

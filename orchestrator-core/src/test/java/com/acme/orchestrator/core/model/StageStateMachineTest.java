@@ -69,7 +69,7 @@ class StageStateMachineTest {
                   HALT, HALTED)),
           Map.entry(
               WAITING_APPROVAL,
-              Map.of(APPROVE, SUCCEEDED, REJECT, FAILED, INVALIDATE, INVALIDATED, HALT, HALTED)),
+              Map.of(APPROVE, SUCCEEDED, REJECT, RETRYING, INVALIDATE, INVALIDATED, HALT, HALTED)),
           Map.entry(RETRYING, Map.of(START, RUNNING, FAIL, FAILED, HALT, HALTED)),
           Map.entry(SUCCEEDED, Map.of(INVALIDATE, INVALIDATED, ROLL_BACK, ROLLED_BACK)),
           Map.entry(FAILED, Map.of(INVALIDATE, INVALIDATED, ROLL_BACK, ROLLED_BACK)),

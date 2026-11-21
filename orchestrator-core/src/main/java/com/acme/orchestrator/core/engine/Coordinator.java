@@ -6,6 +6,7 @@ import static com.acme.orchestrator.core.event.EventType.APPROVAL_REJECTED;
 import static com.acme.orchestrator.core.event.EventType.APPROVAL_REQUESTED;
 import static com.acme.orchestrator.core.event.EventType.ARTIFACT_PRODUCED;
 import static com.acme.orchestrator.core.event.EventType.GATE_EVALUATED;
+import static com.acme.orchestrator.core.event.EventType.POLICY_EVALUATED;
 import static com.acme.orchestrator.core.event.EventType.REPLAN_TRIGGERED;
 import static com.acme.orchestrator.core.event.EventType.RUN_COMPLETED;
 import static com.acme.orchestrator.core.event.EventType.RUN_CREATED;
@@ -13,6 +14,7 @@ import static com.acme.orchestrator.core.event.EventType.RUN_FAILED;
 import static com.acme.orchestrator.core.event.EventType.RUN_HALTED;
 import static com.acme.orchestrator.core.event.EventType.RUN_RESUMED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_FAILED;
+import static com.acme.orchestrator.core.event.EventType.STAGE_INVALIDATED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_READY;
 import static com.acme.orchestrator.core.event.EventType.STAGE_SKIPPED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_STARTED;
@@ -26,6 +28,7 @@ import com.acme.orchestrator.core.dag.Dag;
 import com.acme.orchestrator.core.dag.WorkflowGraph;
 import com.acme.orchestrator.core.engine.Command.AmendRequirement;
 import com.acme.orchestrator.core.engine.Command.ApprovalDecision;
+import com.acme.orchestrator.core.engine.Command.ApprovalTimeout;
 import com.acme.orchestrator.core.engine.Command.Halt;
 import com.acme.orchestrator.core.engine.Command.Resume;
 import com.acme.orchestrator.core.engine.Command.StageCompleted;
@@ -47,12 +50,17 @@ import com.acme.orchestrator.core.model.ProducedBy;
 import com.acme.orchestrator.core.model.Run;
 import com.acme.orchestrator.core.model.RunStatus;
 import com.acme.orchestrator.core.model.StageDefinition;
+import com.acme.orchestrator.core.model.StageEvent;
 import com.acme.orchestrator.core.model.StageInstance;
+import com.acme.orchestrator.core.model.StageStateMachine;
 import com.acme.orchestrator.core.model.StageStatus;
 import com.acme.orchestrator.core.model.WorkflowDefinition;
+import com.acme.orchestrator.core.policy.Effect;
 import com.acme.orchestrator.core.policy.Invariant;
 import com.acme.orchestrator.core.policy.PolicyEngine;
+import com.acme.orchestrator.core.policy.PolicyMatch;
 import com.acme.orchestrator.core.policy.PolicySet;
+import com.acme.orchestrator.core.policy.ProposedAction;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -71,6 +79,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
@@ -95,6 +104,9 @@ import java.util.stream.Stream;
 public final class Coordinator implements AutoCloseable {
 
   private static final System.Logger LOG = System.getLogger(Coordinator.class.getName());
+
+  /** Recorded when someone without authority tries to approve (see {@link Invariant}). */
+  static final String HUMAN_APPROVER_POLICY = "INV-human-approver";
 
   /**
    * What the coordinator works with.
@@ -149,6 +161,9 @@ public final class Coordinator implements AutoCloseable {
 
   /** Stage key → seq of the STAGE_STARTED of its attempt in flight. Coordinator thread only. */
   private final Map<String, Long> inFlight = new LinkedHashMap<>();
+
+  /** Stage key → seq of its open APPROVAL_REQUESTED (for the timeout). Coordinator thread only. */
+  private final Map<String, Long> approvalRequests = new LinkedHashMap<>();
 
   private boolean broken;
 
@@ -321,6 +336,7 @@ public final class Coordinator implements AutoCloseable {
       case StageCompleted c -> onCompleted(c);
       case StageFailed f -> onFailed(f);
       case ApprovalDecision d -> onApproval(d);
+      case ApprovalTimeout t -> onApprovalTimeout(t);
       case AmendRequirement a -> runEvent(REPLAN_TRIGGERED, a.by(), Map.of("amendment", a.text()));
       case Halt h -> {
         RunStatus status = current.run().status();
@@ -361,7 +377,7 @@ public final class Coordinator implements AutoCloseable {
         runEvent(RUN_COMPLETED, Actor.SYSTEM, Map.of());
         return;
       }
-      List<String> ready = dag.readyNodes(current.statuses());
+      List<String> ready = dag.readyNodes(schedulable());
       if (ready.isEmpty()) {
         return; // waiting for agents or approvals
       }
@@ -412,7 +428,8 @@ public final class Coordinator implements AutoCloseable {
             attempt,
             feedback(stageId),
             services.artifacts(),
-            services.tools());
+            services.tools(),
+            services.policies());
     Duration timeout = def.timeout();
     CompletableFuture.supplyAsync(() -> execute(agent, context), workers)
         .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
@@ -424,11 +441,26 @@ public final class Coordinator implements AutoCloseable {
   }
 
   private void onCompleted(StageCompleted c) {
+    recordChecks(c.stageKey(), c.checks());
     if (!isCurrentAttempt(c.stageKey(), c.dispatch())) {
       return; // stale: the stage was halted or moved on while the agent ran
     }
     String stageId = c.stageKey();
     StageDefinition def = stages.get(stageId);
+    List<String> denied =
+        c.checks().stream()
+            .filter(check -> check.decision().denied())
+            .map(check -> check.describe() + " (" + policyIds(check, Effect.DENY) + ")")
+            .toList();
+    if (!denied.isEmpty()) {
+      stageEvent(
+          STAGE_FAILED,
+          stageId,
+          Actor.SYSTEM,
+          Map.of("reason", "policy denied: " + String.join("; ", denied)));
+      return;
+    }
+
     List<Artifact> produced = new ArrayList<>();
     try {
       for (ArtifactOutput out : c.result().artifacts()) {
@@ -467,26 +499,94 @@ public final class Coordinator implements AutoCloseable {
     Optional<String> exitFailure = evaluateGates(def, GateContext.Phase.EXIT, produced);
     if (exitFailure.isPresent()) {
       stageEvent(STAGE_FAILED, stageId, Actor.SYSTEM, Map.of("reason", exitFailure.get()));
-    } else if (services
-        .policies()
-        .stageApprovalRequired(def, current.run().autonomyLevel(), OptionalInt.empty())) {
-      stageEvent(
-          APPROVAL_REQUESTED,
-          stageId,
-          Actor.SYSTEM,
-          Map.of(
-              "reason",
-                  def.approval().required()
-                      ? def.approval().reason()
-                      : Invariant.PUBLISH_REQUIRES_APPROVAL.text(),
-              "summary", c.result().summary(),
-              "artifacts", produced.stream().map(Artifact::id).toList()));
-    } else {
+      return;
+    }
+    OptionalInt risk = stageRisk(c);
+    List<String> reasons = new ArrayList<>();
+    if (services.policies().stageApprovalRequired(def, current.run().autonomyLevel(), risk)) {
+      reasons.add(
+          def.approval().required()
+              ? def.approval().reason()
+              : Invariant.PUBLISH_REQUIRES_APPROVAL.text());
+    }
+    c.checks().stream()
+        .filter(check -> check.decision().effect() == Effect.REQUIRE_APPROVAL)
+        .forEach(check ->
+            reasons.add(
+                "policy: "
+                    + check.describe()
+                    + " needs approval ("
+                    + policyIds(check, Effect.REQUIRE_APPROVAL)
+                    + ")"));
+    if (reasons.isEmpty()) {
       stageEvent(STAGE_SUCCEEDED, stageId, actorOf(def), Map.of("summary", c.result().summary()));
+    } else {
+      requestApproval(def, reasons, c, produced, risk);
     }
   }
 
+  /**
+   * Stage → WAITING_APPROVAL (run → AWAITING_HUMAN once nothing else can run), with what an
+   * approver needs: the reasons, the produced artifact versions, risk, matched policies and diff
+   * size. Starts the approval timeout, if one is configured.
+   */
+  private void requestApproval(
+      StageDefinition def,
+      List<String> reasons,
+      StageCompleted c,
+      List<Artifact> produced,
+      OptionalInt risk) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("reason", String.join("; ", reasons));
+    payload.put("summary", c.result().summary());
+    payload.put("artifacts", produced.stream().map(Artifact::id).toList());
+    payload.put(
+        "artifactRefs",
+        produced.stream()
+            .map(a ->
+                Map.of(
+                    "id", a.id(),
+                    "type", a.type(),
+                    "version", a.version(),
+                    "contentHash", a.contentHash()))
+            .toList());
+    risk.ifPresent(r -> payload.put("riskScore", r));
+    Map<String, Map<String, Object>> matched = new LinkedHashMap<>();
+    for (PolicyCheck check : c.checks()) {
+      for (PolicyMatch m : check.decision().matchedPolicies()) {
+        matched.putIfAbsent(
+            m.policyId(),
+            Map.of("policyId", m.policyId(), "effect", m.effect(), "reason", m.reason()));
+      }
+    }
+    payload.put("matchedPolicies", List.copyOf(matched.values()));
+    c.checks().stream()
+        .map(PolicyCheck::action)
+        .filter(a -> a instanceof ProposedAction.Diff)
+        .map(a -> (ProposedAction.Diff) a)
+        .reduce((first, second) -> second) // the latest diff covers the attempt
+        .ifPresent(d ->
+            payload.put(
+                "diffStats",
+                Map.of("filesChanged", d.filesChanged(), "linesChanged", d.linesChanged())));
+    def.approval().timeout().ifPresent(t -> payload.put("timeout", t));
+    stageEvent(APPROVAL_REQUESTED, def.id(), Actor.SYSTEM, payload);
+
+    long request = current.lastSeq();
+    approvalRequests.put(def.id(), request);
+    def.approval()
+        .timeout()
+        .ifPresent(t ->
+            CompletableFuture.delayedExecutor(t.toMillis(), TimeUnit.MILLISECONDS)
+                .execute(() -> {
+                  if (!closed) {
+                    inbox.add(new ApprovalTimeout(def.id(), request));
+                  }
+                }));
+  }
+
   private void onFailed(StageFailed f) {
+    recordChecks(f.stageKey(), f.checks());
     if (isCurrentAttempt(f.stageKey(), f.dispatch())) {
       stageEvent(
           STAGE_FAILED,
@@ -502,14 +602,143 @@ public final class Coordinator implements AutoCloseable {
       LOG.log(System.Logger.Level.WARNING, "ignored approval for {0}: not waiting", d.stageKey());
       return;
     }
-    if (!(d.approver() instanceof Actor.Human)) {
-      // Only humans approve (role checks arrive in Step 4.3).
-      LOG.log(System.Logger.Level.WARNING, "ignored approval by non-human {0}", d.approver());
+    String refusal =
+        !(d.approver() instanceof Actor.Human)
+            ? "only a human can approve, not " + d.approver()
+            : !ApprovalDecision.APPROVER.equals(d.role())
+                ? d.approver() + " has role '" + d.role() + "', not " + ApprovalDecision.APPROVER
+                : null;
+    if (refusal != null) {
+      // recorded: an attempt to approve without authority is security-relevant
+      stageEvent(
+          POLICY_EVALUATED,
+          d.stageKey(),
+          d.approver(),
+          Map.of(
+              "action",
+              "approval " + d.decision().name().toLowerCase(Locale.ROOT),
+              "effect",
+              Effect.DENY,
+              "matchedPolicies",
+              List.of(
+                  Map.of(
+                      "policyId",
+                      HUMAN_APPROVER_POLICY,
+                      "effect",
+                      Effect.DENY,
+                      "reason",
+                      Invariant.HUMAN_APPROVER.text() + ": " + refusal))));
       return;
     }
-    EventType type =
-        d.decision() == ApprovalDecision.Decision.APPROVE ? APPROVAL_GRANTED : APPROVAL_REJECTED;
-    stageEvent(type, d.stageKey(), d.approver(), Map.of("comment", d.comment()));
+    approvalRequests.remove(d.stageKey());
+    Map<String, Object> payload = Map.of("comment", d.comment(), "role", d.role());
+    if (d.decision() == ApprovalDecision.Decision.APPROVE) {
+      stageEvent(APPROVAL_GRANTED, d.stageKey(), d.approver(), payload);
+      return;
+    }
+
+    stageEvent(APPROVAL_REJECTED, d.stageKey(), d.approver(), payload); // → RETRYING
+    invalidateDownstream(d.stageKey(), "upstream " + d.stageKey() + " was rejected");
+    StageDefinition def = stages.get(d.stageKey());
+    int used = current.stages().get(d.stageKey()).attempt();
+    int allowed = def.retry().maxAttempts();
+    if (used < allowed) {
+      dispatch(d.stageKey(), def); // the comment reaches the agent through feedback()
+    } else {
+      stageEvent(
+          STAGE_FAILED,
+          d.stageKey(),
+          Actor.SYSTEM,
+          Map.of(
+              "reason",
+              "rejected by "
+                  + d.approver()
+                  + " and no attempts are left ("
+                  + used
+                  + " of "
+                  + allowed
+                  + " used): "
+                  + d.comment()));
+    }
+  }
+
+  /** Halts the run if the stage is still waiting on the request the timer was started for. */
+  private void onApprovalTimeout(ApprovalTimeout t) {
+    if (statusOf(t.stageKey()) == StageStatus.WAITING_APPROVAL
+        && Long.valueOf(t.request()).equals(approvalRequests.get(t.stageKey()))
+        && current.run().status() != RunStatus.HALTED) {
+      approvalRequests.remove(t.stageKey());
+      runEvent(
+          RUN_HALTED,
+          Actor.SYSTEM,
+          Map.of(
+              "reason",
+              "approval of "
+                  + t.stageKey()
+                  + " was not given within "
+                  + stages.get(t.stageKey()).approval().timeout().orElseThrow(),
+              "stageId",
+              t.stageKey()));
+    }
+  }
+
+  /** Each policy check becomes a POLICY_EVALUATED event (the audit trail of what agents asked). */
+  private void recordChecks(String stageKey, List<PolicyCheck> checks) {
+    for (PolicyCheck check : checks) {
+      stageEvent(
+          POLICY_EVALUATED,
+          stageKey,
+          actorOf(stages.get(stageKey)),
+          Map.of(
+              "action", check.describe(),
+              "effect", check.decision().effect(),
+              "riskScore", check.decision().riskScore(),
+              "matchedPolicies",
+                  check.decision().matchedPolicies().stream()
+                      .map(m ->
+                          Map.of(
+                              "policyId", m.policyId(),
+                              "effect", m.effect(),
+                              "reason", m.reason()))
+                      .toList()));
+    }
+  }
+
+  private static String policyIds(PolicyCheck check, Effect effect) {
+    return String.join(
+        ", ",
+        check.decision().matchedPolicies().stream()
+            .filter(m -> m.effect() == effect)
+            .map(PolicyMatch::policyId)
+            .toList());
+  }
+
+  /** The highest of the agent's own assessment and its policy checks; empty when neither exists. */
+  private static OptionalInt stageRisk(StageCompleted c) {
+    IntStream scores =
+        IntStream.concat(
+            c.reportedRisk().stream(), c.checks().stream().mapToInt(x -> x.decision().riskScore()));
+    return scores.max();
+  }
+
+  /** Stages downstream of {@code stageKey} that have started or finished are invalidated. */
+  private void invalidateDownstream(String stageKey, String reason) {
+    for (String downstream : dag.downstreamClosure(stageKey)) {
+      if (StageStateMachine.canTransition(statusOf(downstream), StageEvent.INVALIDATE)) {
+        inFlight.remove(downstream);
+        approvalRequests.remove(downstream);
+        stageEvent(STAGE_INVALIDATED, downstream, Actor.SYSTEM, Map.of("reason", reason));
+      }
+    }
+  }
+
+  /**
+   * Statuses for the ready-check: an invalidated stage is pending again (STAGE_READY resets it).
+   */
+  private Map<String, StageStatus> schedulable() {
+    Map<String, StageStatus> statuses = new LinkedHashMap<>(current.statuses());
+    statuses.replaceAll((k, s) -> s == StageStatus.INVALIDATED ? StageStatus.PENDING : s);
+    return statuses;
   }
 
   // ---- helpers ------------------------------------------------------------------------------
@@ -579,12 +808,15 @@ public final class Coordinator implements AutoCloseable {
           cause instanceof TimeoutException
               ? "timed out after " + timeout
               : "agent threw " + cause.getClass().getSimpleName() + ": " + cause.getMessage();
-      return new StageFailed(stageId, dispatch, reason);
+      return new StageFailed(stageId, dispatch, reason, context.checks());
     }
     return switch (result) {
-      case null -> new StageFailed(stageId, dispatch, "agent returned no result");
-      case AgentResult.Success s -> new StageCompleted(stageId, dispatch, s, context.reads());
-      case AgentResult.Failure f -> new StageFailed(stageId, dispatch, f.reason());
+      case null -> new StageFailed(stageId, dispatch, "agent returned no result", context.checks());
+      case AgentResult.Success s ->
+          new StageCompleted(
+              stageId, dispatch, s, context.reads(), context.checks(), context.reportedRisk());
+      case AgentResult.Failure f ->
+          new StageFailed(stageId, dispatch, f.reason(), context.checks());
     };
   }
 

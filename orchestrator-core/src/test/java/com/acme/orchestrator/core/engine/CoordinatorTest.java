@@ -1,5 +1,6 @@
 package com.acme.orchestrator.core.engine;
 
+import static com.acme.orchestrator.core.engine.Command.ApprovalDecision.APPROVER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -213,7 +214,7 @@ class CoordinatorTest {
           .forEach((stage, status) -> {
             if (status == StageStatus.WAITING_APPROVAL) {
               coordinator.submit(
-                  new Command.ApprovalDecision(stage, ALICE, Decision.APPROVE, "ok"));
+                  new Command.ApprovalDecision(stage, ALICE, APPROVER, Decision.APPROVE, "ok"));
             }
           });
       long seen = state.lastSeq();
@@ -501,7 +502,7 @@ class CoordinatorTest {
   }
 
   @Test
-  void approvalsComeOnlyFromHumansAndRejectionFailsTheStage() throws Exception {
+  void approvalsComeOnlyFromHumansAndARejectionWithNoAttemptsLeftFailsTheStage() throws Exception {
     WorkflowDefinition wf =
         workflow(
             """
@@ -522,9 +523,11 @@ class CoordinatorTest {
 
     // An agent can't approve, and approving an unknown stage does nothing.
     coordinator.submit(
-        new Command.ApprovalDecision("a", Actor.agent("DesignAgent"), Decision.APPROVE, "lgtm"));
-    coordinator.submit(new Command.ApprovalDecision("zzz", ALICE, Decision.APPROVE, ""));
-    coordinator.submit(new Command.ApprovalDecision("a", ALICE, Decision.REJECT, "scope too big"));
+        new Command.ApprovalDecision(
+            "a", Actor.agent("DesignAgent"), APPROVER, Decision.APPROVE, "lgtm"));
+    coordinator.submit(new Command.ApprovalDecision("zzz", ALICE, APPROVER, Decision.APPROVE, ""));
+    coordinator.submit(
+        new Command.ApprovalDecision("a", ALICE, APPROVER, Decision.REJECT, "scope too big"));
 
     RunState end = awaitStatus(RunStatus.FAILED);
     assertThat(end.statuses()).containsEntry("a", StageStatus.FAILED).doesNotContainKey("b");
@@ -539,6 +542,14 @@ class CoordinatorTest {
           assertThat(e.type()).isEqualTo(EventType.APPROVAL_REJECTED);
           assertThat(e.actor()).isEqualTo(ALICE);
           assertThat(e.payload()).containsEntry("comment", "scope too big");
+        });
+    assertThat(events.events("run-1").stream().filter(e -> e.type() == EventType.STAGE_FAILED))
+        .singleElement()
+        .satisfies(e -> {
+          assertThat(e.payload())
+              .containsEntry(
+                  "reason",
+                  "rejected by human:alice and no attempts are left (1 of 1 used): scope too big");
         });
   }
 
@@ -702,7 +713,8 @@ class CoordinatorTest {
         .satisfies(e ->
             assertThat(e.payload()).containsEntry("reason", "publish requires human approval"));
 
-    coordinator.submit(new Command.ApprovalDecision("publish", ALICE, Decision.APPROVE, "ship it"));
+    coordinator.submit(
+        new Command.ApprovalDecision("publish", ALICE, APPROVER, Decision.APPROVE, "ship it"));
     awaitStatus(RunStatus.COMPLETED);
   }
 
