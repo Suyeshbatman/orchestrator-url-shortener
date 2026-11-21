@@ -10,6 +10,27 @@
   <artifactId>orchestrator-cli</artifactId>
   <name>orchestrator-cli</name>
   <description>Cross-platform demo and operator CLI (replaces bash scripts)</description>
+  <dependencies>
+    <dependency>
+      <groupId>com.acme</groupId>
+      <artifactId>orchestrator-agents</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.platform</groupId>
+      <artifactId>junit-platform-launcher</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
   <build>
     <plugins>
       <plugin>

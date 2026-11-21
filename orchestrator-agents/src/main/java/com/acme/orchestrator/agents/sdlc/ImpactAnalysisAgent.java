@@ -14,6 +14,7 @@ import tools.jackson.databind.JsonNode;
 public final class ImpactAnalysisAgent extends LlmAgent {
 
   public static final String NAME = "ImpactAnalysisAgent";
+  static final String TARGET_MODULE = "shortener-service";
 
   public ImpactAnalysisAgent(AgentKit kit) {
     super(kit, NAME, ArtifactTypes.IMPACT_REPORT, 6_000);
@@ -25,7 +26,9 @@ public final class ImpactAnalysisAgent extends LlmAgent {
     return Map.of(
         "spec", content(ctx, ArtifactTypes.REQUIREMENTS_SPEC),
         "taskGraph", content(ctx, ArtifactTypes.TASK_GRAPH),
-        "repoMap", new CodeIndexTool(workspace.root()).index().toMarkdown());
+        // the target system only: the orchestrator's own code is not what is being changed (and
+        // keeping it out keeps recorded prompts stable while the orchestrator evolves)
+        "repoMap", new CodeIndexTool(workspace.root(), TARGET_MODULE).index().toMarkdown());
   }
 
   @Override

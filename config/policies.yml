@@ -5,7 +5,7 @@ policies:
     effect: DENY
   - id: SEC-002-path-jail
     on: file_write
-    allow_paths: ["shortener-service/src/**", "docs/**", "scenarios/**"]
+    allow_paths: ["shortener-service/src/**", "shortener-service/pom.xml", "docs/**", "scenarios/**"]
     effect_outside: DENY
   - id: SEC-003-forbidden-paths
     on: file_write

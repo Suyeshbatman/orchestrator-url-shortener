@@ -1508,7 +1508,7 @@ public final class Coordinator implements AutoCloseable {
             + onFailure
                 .feedback()
                 .flatMap(type -> services.artifacts().latestOfType(runId, type))
-                .map(a -> " (see " + a.id() + ")")
+                .map(a -> " (see " + a.type() + " v" + a.version() + ")") // no run id: replayable
                 .orElse("");
     stageEvent(
         STAGE_INVALIDATED,

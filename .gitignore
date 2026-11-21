@@ -12,6 +12,8 @@ build/
 # Orchestrator runtime (workspaces, ad-hoc run fixtures)
 .agent-worktrees/
 .orchestrator/
+# prompts waiting for a hand-written reply (record-fixtures)
+scenarios/*/replies/pending/
 
 # IntelliJ IDEA
 .idea/

@@ -1,0 +1,9 @@
+# Scenario 7.1 — greenfield: a QR code for every short link.
+# Shows: GREENFIELD skips impact_analysis; implementation, tests and docs run in parallel; adding a
+# library (shortener-service/pom.xml) is allowed but needs approval (CHG-002).
+mode: GREENFIELD
+autonomy: L1_SUPERVISED
+base: main
+expect: COMPLETED
+# Every approval is granted by the scripted approver (alice).
+decisions: []

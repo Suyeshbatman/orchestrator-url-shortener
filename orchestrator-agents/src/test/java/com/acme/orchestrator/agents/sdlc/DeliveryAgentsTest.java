@@ -92,14 +92,14 @@ class DeliveryAgentsTest {
   @Test
   void aPatchTouchingAForbiddenPathIsRefused() {
     String patch =
-        "{\"summary\":\"bump a dependency\",\"files\":[{\"path\":\"shortener-service/pom.xml\","
+        "{\"summary\":\"bump a dependency\",\"files\":[{\"path\":\"pom.xml\","
             + "\"newContent\":\"<project/>\"}]}";
 
     assertThatThrownBy(() ->
             new ImplementationAgent(h.recording(replay, patch)).execute(ctx("implementation")))
         .isInstanceOf(PolicyDeniedException.class)
         .hasMessageContaining("SEC-002");
-    assertThat(workspace.root().resolve("shortener-service/pom.xml")).doesNotExist();
+    assertThat(workspace.root().resolve("pom.xml")).doesNotExist();
   }
 
   @Test

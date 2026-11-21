@@ -324,7 +324,7 @@ class RetryAndLoopTest {
             List.of(),
             List.of(
                 "val failed: exit gate tests.green failed: 1 test failed"
-                    + " (see run-1:val:validation_report:v1)"));
+                    + " (see validation_report v1)"));
     assertThat(validations).hasValue(2);
     assertThat(end.stages().get("impl").loopCount()).isEqualTo(1);
     assertThat(end.stages().get("val").loopCount()).isEqualTo(1);

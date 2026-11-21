@@ -159,17 +159,16 @@ class PolicyEngineTest {
   }
 
   @Test
-  void chg002DependencyChangesNeedApprovalButPomsAreOutsideTheJail() {
-    // As configured, the jail (shortener-service/src/**) excludes the module POM, so the
-    // stricter DENY wins: agents can't change dependencies at all.
+  void chg002DependencyChangesNeedApproval() {
+    // the module POM is inside the jail; changing dependencies waits for a human
     Decision decision = write("shortener-service/pom.xml");
 
-    assertThat(decision.effect()).isEqualTo(Effect.DENY);
+    assertThat(decision.effect()).isEqualTo(Effect.REQUIRE_APPROVAL);
     assertThat(decision.matchedPolicies())
         .extracting(PolicyMatch::policyId, PolicyMatch::effect)
-        .containsExactly(
-            tuple("SEC-002-path-jail", Effect.DENY),
-            tuple("CHG-002-dependency-change", Effect.REQUIRE_APPROVAL));
+        .containsExactly(tuple("CHG-002-dependency-change", Effect.REQUIRE_APPROVAL));
+    // the root POM (which also lists the orchestrator modules) stays out of reach
+    assertThat(write("pom.xml").effect()).isEqualTo(Effect.DENY);
   }
 
   @Test

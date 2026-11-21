@@ -72,9 +72,17 @@ public final class CodeIndexTool {
   private static final Pattern MIGRATION = Pattern.compile("V\\d+(?:_\\d+)*__\\w+\\.sql");
 
   private final Path root;
+  private final Path start;
 
   public CodeIndexTool(Path root) {
     this.root = root.toAbsolutePath().normalize();
+    this.start = this.root;
+  }
+
+  /** Only {@code subdir} is indexed; paths stay relative to {@code root}. */
+  public CodeIndexTool(Path root, String subdir) {
+    this.root = root.toAbsolutePath().normalize();
+    this.start = this.root.resolve(subdir).normalize();
   }
 
   public RepoMap index() {
@@ -130,7 +138,7 @@ public final class CodeIndexTool {
   }
 
   private List<Path> files() {
-    try (Stream<Path> paths = Files.walk(root)) {
+    try (Stream<Path> paths = Files.walk(start)) {
       return paths
           .filter(Files::isRegularFile)
           .filter(p -> {
