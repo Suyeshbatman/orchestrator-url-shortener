@@ -21,13 +21,15 @@ public enum FailureKind {
   }
 
   /**
-   * What an exception thrown by an agent means: {@link TransientAgentException}, timeouts and I/O
-   * errors are transient; {@code IllegalStateException}/{@code IllegalArgumentException} (a bug or
-   * a broken precondition) are fatal; anything else unknown gets the benefit of the doubt.
+   * What an exception thrown by an agent means: {@link AgentValidationException} is a validation
+   * failure; {@link TransientAgentException}, timeouts and I/O errors are transient; {@code
+   * IllegalStateException}/{@code IllegalArgumentException} (a bug or a broken precondition) are
+   * fatal; anything else unknown gets the benefit of the doubt.
    */
   public static FailureKind of(Throwable error) {
     return switch (error) {
       case BudgetExceededException e -> BUDGET;
+      case AgentValidationException e -> VALIDATION;
       case TransientAgentException e -> TRANSIENT;
       case TimeoutException e -> TRANSIENT;
       case IOException e -> TRANSIENT;

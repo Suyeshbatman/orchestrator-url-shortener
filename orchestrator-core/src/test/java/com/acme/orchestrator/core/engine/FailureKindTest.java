@@ -12,6 +12,8 @@ class FailureKindTest {
   @Test
   void exceptionsAreClassified() {
     assertThat(FailureKind.of(new TransientAgentException("429"))).isEqualTo(FailureKind.TRANSIENT);
+    assertThat(FailureKind.of(new AgentValidationException("schema")))
+        .isEqualTo(FailureKind.VALIDATION);
     assertThat(FailureKind.of(new TimeoutException())).isEqualTo(FailureKind.TRANSIENT);
     assertThat(FailureKind.of(new IOException("reset"))).isEqualTo(FailureKind.TRANSIENT);
     assertThat(FailureKind.of(new UncheckedIOException(new IOException("reset"))))

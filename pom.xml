@@ -37,6 +37,8 @@
     <jqwik.version>1.10.2</jqwik.version>
     <springdoc.version>3.2.1</springdoc.version>
     <resilience4j.version>2.4.0</resilience4j.version>
+    <anthropic-java.version>3.6.0</anthropic-java.version>
+    <json-schema-validator.version>3.0.9</json-schema-validator.version>
   </properties>
 
   <dependencyManagement>
@@ -60,6 +62,21 @@
         <groupId>io.github.resilience4j</groupId>
         <artifactId>resilience4j-circuitbreaker</artifactId>
         <version>${resilience4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-retry</artifactId>
+        <version>${resilience4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.anthropic</groupId>
+        <artifactId>anthropic-java</artifactId>
+        <version>${anthropic-java.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.networknt</groupId>
+        <artifactId>json-schema-validator</artifactId>
+        <version>${json-schema-validator.version}</version>
       </dependency>
       <dependency>
         <groupId>net.jqwik</groupId>
