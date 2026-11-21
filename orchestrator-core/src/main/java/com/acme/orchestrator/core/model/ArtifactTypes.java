@@ -28,5 +28,8 @@ public final class ArtifactTypes {
   /** Documentation changes, same shape as {@link #PATCH}. */
   public static final String DOCS = "docs";
 
+  /** What publish merged: {@code {"branch", "baseBranch", "commit", "remote"}}. */
+  public static final String PUBLISH_RECORD = "publish_record";
+
   private ArtifactTypes() {}
 }

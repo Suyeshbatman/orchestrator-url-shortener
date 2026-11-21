@@ -25,14 +25,25 @@ public final class WorkspaceManager {
 
   private static final Pattern RUN_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
 
-  private final Path sourceRepo;
+  private final String sourceUri;
   private final Path workspaceRoot;
   private final String baseBranch;
 
   public WorkspaceManager(Path sourceRepo, Path workspaceRoot, String baseBranch) {
-    this.sourceRepo = sourceRepo.toAbsolutePath().normalize();
+    this(sourceRepo.toAbsolutePath().normalize().toUri().toString(), workspaceRoot, baseBranch);
+  }
+
+  /**
+   * @param sourceUri what to clone (a path URI or a remote); publish pushes back to it
+   */
+  public WorkspaceManager(String sourceUri, Path workspaceRoot, String baseBranch) {
+    this.sourceUri = Objects.requireNonNull(sourceUri, "sourceUri");
     this.workspaceRoot = workspaceRoot.toAbsolutePath().normalize();
     this.baseBranch = Objects.requireNonNull(baseBranch, "baseBranch");
+  }
+
+  public String baseBranch() {
+    return baseBranch;
   }
 
   /** Creates the workspace, or opens it if the run already has one (a resumed run). */
@@ -46,7 +57,7 @@ public final class WorkspaceManager {
       Files.createDirectories(workspaceRoot);
       try (Git git =
           Git.cloneRepository()
-              .setURI(sourceRepo.toUri().toString())
+              .setURI(sourceUri)
               .setDirectory(dir.toFile())
               .setBranch(baseBranch)
               .setNoCheckout(true)
@@ -55,11 +66,12 @@ public final class WorkspaceManager {
         // rewrite line endings on checkout and restore, making diffs and checkpoints lie)
         StoredConfig config = git.getRepository().getConfig();
         config.setBoolean("core", null, "autocrlf", false);
+        config.setBoolean("commit", null, "gpgsign", false); // no signing prompts in a sandbox
         config.save();
         git.reset().setMode(ResetCommand.ResetType.HARD).call(); // check out the files
         ObjectId base = git.getRepository().resolve("HEAD");
         if (base == null) {
-          throw new IllegalStateException(sourceRepo + " has no commits on " + baseBranch);
+          throw new IllegalStateException(sourceUri + " has no commits on " + baseBranch);
         }
         git.checkout().setCreateBranch(true).setName(branchFor(runId)).call();
         return new Workspace(runId, dir, branchFor(runId), base.name());

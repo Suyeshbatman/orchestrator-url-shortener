@@ -72,7 +72,7 @@ class ApprovalFlowTest {
             new Coordinator.Services(
                 events,
                 artifacts,
-                AgentRegistry.of(Map.of("A", agent)),
+                AgentRegistry.of(Map.of("A", agent, "git.mergeToMain", agent)),
                 GateEvaluator.PASS_ALL,
                 ToolRegistry.EMPTY,
                 POLICIES));
@@ -370,5 +370,79 @@ class ApprovalFlowTest {
         .doesNotContainKey("timeout");
     decide("a", ALICE, APPROVER, Decision.APPROVE, "");
     awaitStatus(RunStatus.COMPLETED);
+  }
+
+  // ---- publish: approved before it runs -------------------------------------------------------
+
+  private static final String PUBLISH =
+      """
+        - id: release
+          agent: A
+        - id: publish
+          action: git.mergeToMain
+          dependsOn: [release]
+          approval: { required: true, reason: "Merge to main" }
+      """;
+
+  @Test
+  void aPublishIsApprovedBeforeItRunsAndRunsOnlyOnce() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger merges =
+        new java.util.concurrent.atomic.AtomicInteger();
+    Agent agent =
+        ctx -> {
+          if (ctx.stageKey().equals("publish")) {
+            merges.incrementAndGet();
+          }
+          return AgentResult.success("done", ArtifactOutput.of(ctx.stageKey(), "{}", "test"));
+        };
+    start(workflow(PUBLISH), AutonomyLevel.L2_TRUSTED, agent);
+
+    RunState waiting = awaitStatus(RunStatus.AWAITING_HUMAN);
+    assertThat(waiting.statuses()).containsEntry("publish", StageStatus.WAITING_APPROVAL);
+    assertThat(waiting.stages().get("publish").attempt()).isZero(); // nothing ran yet
+    assertThat(merges).hasValue(0);
+    assertThat(ofType(EventType.APPROVAL_REQUESTED).getFirst().payload())
+        .containsEntry("before", true)
+        .containsEntry("reason", "Merge to main")
+        .containsEntry("summary", "git.mergeToMain runs once this is approved");
+
+    decide("publish", ALICE, APPROVER, Decision.APPROVE, "ship it");
+    awaitStatus(RunStatus.COMPLETED);
+
+    assertThat(merges).hasValue(1);
+    assertThat(ofType(EventType.APPROVAL_REQUESTED)).hasSize(1); // not asked again afterwards
+    List<EventType> order =
+        events.events("run-1").stream()
+            .filter(e -> e.stageId().filter("publish"::equals).isPresent())
+            .map(Event::type)
+            .toList();
+    assertThat(order.indexOf(EventType.APPROVAL_GRANTED))
+        .isLessThan(order.indexOf(EventType.AGENT_INVOKED));
+  }
+
+  @Test
+  void aRejectedPublishNeverRuns() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger merges =
+        new java.util.concurrent.atomic.AtomicInteger();
+    Agent agent =
+        ctx -> {
+          if (ctx.stageKey().equals("publish")) {
+            merges.incrementAndGet();
+          }
+          return AgentResult.success("done");
+        };
+    start(
+        workflow(PUBLISH.replace("    approval:", "    retry: { maxAttempts: 3 }\n    approval:")),
+        AutonomyLevel.L1_SUPERVISED,
+        agent);
+    awaitStatus(RunStatus.AWAITING_HUMAN);
+
+    decide("publish", ALICE, APPROVER, Decision.REJECT, "no-go: wait for the freeze to end");
+    awaitStatus(RunStatus.FAILED);
+
+    assertThat(merges).hasValue(0); // even with attempts to spare
+    assertThat(ofType(EventType.STAGE_FAILED).getFirst().payload())
+        .containsEntry(
+            "reason", "rejected by human:alice before it ran: no-go: wait for the freeze to end");
   }
 }

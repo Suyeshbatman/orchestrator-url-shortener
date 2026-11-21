@@ -608,7 +608,45 @@ public final class Coordinator implements AutoCloseable {
         return;
       }
     }
+    if (approvedBeforeRunning(def)) {
+      requestApprovalToStart(def);
+      return;
+    }
     dispatch(stageId, def);
+  }
+
+  /**
+   * Publish actions (merging to main) are approved before they run, not after: an approval of a
+   * merge that already happened would govern nothing.
+   */
+  private static boolean approvedBeforeRunning(StageDefinition def) {
+    return def.executor() instanceof Executor.Action action
+        && PolicyEngine.PUBLISH_ACTIONS.contains(action.name());
+  }
+
+  /** READY → WAITING_APPROVAL, showing the approver the release and validation reports. */
+  private void requestApprovalToStart(StageDefinition def) {
+    List<Artifact> evidence =
+        List.of(ArtifactTypes.RELEASE_REPORT, ArtifactTypes.VALIDATION_REPORT).stream()
+            .map(type -> services.artifacts().latestOfType(runId, type))
+            .flatMap(Optional::stream)
+            .toList();
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put(
+        "reason",
+        def.approval().required()
+            ? def.approval().reason()
+            : Invariant.PUBLISH_REQUIRES_APPROVAL.text());
+    payload.put("summary", def.executor().name() + " runs once this is approved");
+    payload.put("before", true);
+    payload.put("artifacts", evidence.stream().map(Artifact::id).toList());
+    payload.put("artifactRefs", evidence.stream().map(Coordinator::refPayload).toList());
+    def.approval().timeout().ifPresent(t -> payload.put("timeout", t));
+    stageEvent(APPROVAL_REQUESTED, def.id(), Actor.SYSTEM, payload);
+
+    long request = current.lastSeq();
+    approvalRequests.put(def.id(), request);
+    def.approval().timeout().ifPresent(t -> later(t, new ApprovalTimeout(def.id(), request)));
   }
 
   private void dispatch(String stageId, StageDefinition def) {
@@ -726,7 +764,8 @@ public final class Coordinator implements AutoCloseable {
     }
     OptionalInt risk = stageRisk(c);
     List<String> reasons = new ArrayList<>();
-    if (services.policies().stageApprovalRequired(def, current.run().autonomyLevel(), risk)) {
+    if (!approvedBeforeRunning(def)
+        && services.policies().stageApprovalRequired(def, current.run().autonomyLevel(), risk)) {
       reasons.add(
           def.approval().required()
               ? def.approval().reason()
@@ -853,12 +892,25 @@ public final class Coordinator implements AutoCloseable {
     }
     approvalRequests.remove(d.stageKey());
     Map<String, Object> payload = Map.of("comment", d.comment(), "role", d.role());
+    boolean beforeRunning = stage.attempt() == 0;
     if (d.decision() == ApprovalDecision.Decision.APPROVE) {
       stageEvent(APPROVAL_GRANTED, d.stageKey(), d.approver(), payload);
+      if (beforeRunning && stopping == null) {
+        dispatch(d.stageKey(), stages.get(d.stageKey())); // READY again: it may run now
+      }
       return;
     }
 
     stageEvent(APPROVAL_REJECTED, d.stageKey(), d.approver(), payload); // → RETRYING
+    if (beforeRunning) {
+      // a no-go: the action must never run
+      failAttempt(
+          d.stageKey(),
+          "rejected by " + d.approver() + " before it ran: " + d.comment(),
+          FailureKind.FATAL,
+          Actor.SYSTEM);
+      return;
+    }
     restoreIfWritten(d.stageKey()); // the rejected work is discarded
     replan(
         "rejected",

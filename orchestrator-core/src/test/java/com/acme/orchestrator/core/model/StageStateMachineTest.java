@@ -1,6 +1,7 @@
 package com.acme.orchestrator.core.model;
 
 import static com.acme.orchestrator.core.model.StageEvent.APPROVE;
+import static com.acme.orchestrator.core.model.StageEvent.APPROVE_START;
 import static com.acme.orchestrator.core.model.StageEvent.AWAIT_APPROVAL;
 import static com.acme.orchestrator.core.model.StageEvent.DEPENDENCIES_MET;
 import static com.acme.orchestrator.core.model.StageEvent.FAIL;
@@ -37,8 +38,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * Every (status, event) pair: the 36 legal ones must land where this independent copy of the table
- * says, and the other 107 must throw.
+ * Every (status, event) pair: the 38 legal ones must land where this independent copy of the table
+ * says, and the other 116 must throw.
  */
 class StageStateMachineTest {
 
@@ -53,7 +54,8 @@ class StageStateMachineTest {
                   FAIL, FAILED,
                   INVALIDATE, INVALIDATED,
                   HALT, HALTED,
-                  ROLL_BACK, ROLLED_BACK)),
+                  ROLL_BACK, ROLLED_BACK,
+                  AWAIT_APPROVAL, WAITING_APPROVAL)),
           Map.entry(
               RUNNING,
               Map.of(
@@ -68,6 +70,7 @@ class StageStateMachineTest {
               WAITING_APPROVAL,
               Map.of(
                   APPROVE, SUCCEEDED,
+                  APPROVE_START, READY,
                   REJECT, RETRYING,
                   INVALIDATE, INVALIDATED,
                   HALT, HALTED,
@@ -125,9 +128,9 @@ class StageStateMachineTest {
 
   @Test
   void tableCoversEveryStatusAndMatchesExactly() {
-    assertThat(legal().count()).isEqualTo(36);
+    assertThat(legal().count()).isEqualTo(38);
     assertThat(illegal().count())
-        .isEqualTo((long) StageStatus.values().length * StageEvent.values().length - 36);
+        .isEqualTo((long) StageStatus.values().length * StageEvent.values().length - 38);
     for (StageStatus s : StageStatus.values()) {
       assertThat(StageStateMachine.allowed(s)).isEqualTo(EXPECTED.get(s));
     }

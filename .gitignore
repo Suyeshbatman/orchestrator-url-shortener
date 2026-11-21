@@ -9,8 +9,9 @@ build/
 .env
 *.env.local
 
-# Orchestrator runtime
+# Orchestrator runtime (workspaces, ad-hoc run fixtures)
 .agent-worktrees/
+.orchestrator/
 
 # IntelliJ IDEA
 .idea/

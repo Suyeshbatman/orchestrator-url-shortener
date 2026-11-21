@@ -1,6 +1,7 @@
 package com.acme.orchestrator.core.model;
 
 import static com.acme.orchestrator.core.model.StageEvent.APPROVE;
+import static com.acme.orchestrator.core.model.StageEvent.APPROVE_START;
 import static com.acme.orchestrator.core.model.StageEvent.AWAIT_APPROVAL;
 import static com.acme.orchestrator.core.model.StageEvent.DEPENDENCIES_MET;
 import static com.acme.orchestrator.core.model.StageEvent.FAIL;
@@ -38,10 +39,11 @@ import java.util.Optional;
  * <pre>
  * PENDING          DEPENDENCIES_MET→READY  SKIP→SKIPPED  HALT→HALTED
  * READY            START→RUNNING  SKIP→SKIPPED  FAIL→FAILED (entry gate)  INVALIDATE→INVALIDATED
- *                  HALT→HALTED
+ *                  HALT→HALTED  AWAIT_APPROVAL→WAITING_APPROVAL (approval before a publish runs)
  * RUNNING          SUCCEED→SUCCEEDED  AWAIT_APPROVAL→WAITING_APPROVAL  SCHEDULE_RETRY→RETRYING
  *                  FAIL→FAILED  INVALIDATE→INVALIDATED  HALT→HALTED
- * WAITING_APPROVAL APPROVE→SUCCEEDED  REJECT→RETRYING  INVALIDATE→INVALIDATED  HALT→HALTED
+ * WAITING_APPROVAL APPROVE→SUCCEEDED  APPROVE_START→READY  REJECT→RETRYING
+ *                  INVALIDATE→INVALIDATED  HALT→HALTED
  * RETRYING         START→RUNNING  FAIL→FAILED  HALT→HALTED
  * SUCCEEDED        INVALIDATE→INVALIDATED
  * FAILED           INVALIDATE→INVALIDATED
@@ -92,6 +94,7 @@ public final class StageStateMachine {
     t.get(READY).put(FAIL, FAILED); // an entry gate failed
     t.get(READY).put(INVALIDATE, INVALIDATED);
     t.get(READY).put(HALT, HALTED);
+    t.get(READY).put(AWAIT_APPROVAL, WAITING_APPROVAL); // a publish asks before it runs
 
     t.get(RUNNING).put(SUCCEED, SUCCEEDED);
     t.get(RUNNING).put(AWAIT_APPROVAL, WAITING_APPROVAL);
@@ -101,6 +104,7 @@ public final class StageStateMachine {
     t.get(RUNNING).put(HALT, HALTED);
 
     t.get(WAITING_APPROVAL).put(APPROVE, SUCCEEDED);
+    t.get(WAITING_APPROVAL).put(APPROVE_START, READY); // approved before it ran
     t.get(WAITING_APPROVAL).put(REJECT, RETRYING); // re-run with the comment (or FAIL if spent)
     t.get(WAITING_APPROVAL).put(INVALIDATE, INVALIDATED);
     t.get(WAITING_APPROVAL).put(HALT, HALTED);

@@ -26,6 +26,8 @@ import java.util.Optional;
  *
  * <ul>
  *   <li>STAGE_READY on an INVALIDATED or ROLLED_BACK stage first resets it, then marks it ready.
+ *   <li>APPROVAL_GRANTED for a stage that has not run yet (a publish approved before it runs) makes
+ *       it READY rather than SUCCEEDED.
  *   <li>FALLBACK_USED, like STAGE_RETRIED, schedules another attempt (RUNNING → RETRYING).
  *   <li>RUN_HALTED halts every stage that is in progress (PENDING, READY, RUNNING,
  *       WAITING_APPROVAL, RETRYING); RUN_RESUMED resets every HALTED stage to PENDING.
@@ -136,6 +138,11 @@ public final class RunStateProjector {
         && (current.status() == StageStatus.INVALIDATED
             || current.status() == StageStatus.ROLLED_BACK)) {
       current = current.apply(StageEvent.RESET, at);
+    }
+    if (event == StageEvent.APPROVE
+        && current.status() == StageStatus.WAITING_APPROVAL
+        && current.attempt() == 0) {
+      event = StageEvent.APPROVE_START; // approved before it ran: it may start now
     }
     stages.put(current.key(), current.apply(event, at));
   }
