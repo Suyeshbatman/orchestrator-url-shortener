@@ -5,6 +5,7 @@ import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -423,6 +424,25 @@ class OrchestrationApiIT {
             OPERATOR)
         .andExpect(status().isBadRequest());
     assertThat(stageStatus(id, "publish")).isEqualTo("PENDING");
+  }
+
+  @Test
+  void theDashboardIsServedWithoutAKeyButItsDataIsNot() throws Exception {
+    mvc.perform(get("/")).andExpect(status().isOk()).andExpect(forwardedUrl("index.html"));
+    String page =
+        mvc.perform(get("/index.html"))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    assertThat(page)
+        .contains("<title>Orchestrator Console</title>")
+        .contains("mermaid@11.4.1") // pinned, with subresource integrity
+        .contains("integrity=\"sha384-")
+        .contains("X-API-Key")
+        .doesNotContain("localStorage") // the key stays in memory
+        .doesNotContain("sessionStorage");
+    call(get("/api/runs"), null).andExpect(status().isUnauthorized());
   }
 
   @Test
