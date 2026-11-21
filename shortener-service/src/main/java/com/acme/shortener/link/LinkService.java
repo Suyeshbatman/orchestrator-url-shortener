@@ -7,6 +7,8 @@ import com.acme.shortener.code.AliasValidator;
 import com.acme.shortener.code.CodeGenerator;
 import com.acme.shortener.config.ShortenerProperties;
 import com.acme.shortener.url.UrlValidator;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.net.URI;
 import java.time.Clock;
 import java.util.Objects;
@@ -29,6 +31,13 @@ public class LinkService {
   private final Clock clock;
   private final String baseUrl;
 
+  // shortener.create / shortener.resolve, tagged by outcome; histograms for p95/p99 (NFR-1).
+  private final Timer createCreated;
+  private final Timer createFailed;
+  private final Timer resolveFound;
+  private final Timer resolveNotFound;
+  private final Timer resolveError;
+
   public LinkService(
       LinkRepository links,
       CodeGenerator codeGenerator,
@@ -36,7 +45,8 @@ public class LinkService {
       UrlValidator urlValidator,
       LinkCache cache,
       Clock clock,
-      ShortenerProperties properties) {
+      ShortenerProperties properties,
+      MeterRegistry meters) {
     this.links = links;
     this.codeGenerator = codeGenerator;
     this.aliasValidator = aliasValidator;
@@ -44,26 +54,58 @@ public class LinkService {
     this.cache = cache;
     this.clock = clock;
     this.baseUrl = properties.baseUrl();
+    this.createCreated = timer(meters, "shortener.create", "created");
+    this.createFailed = timer(meters, "shortener.create", "failed");
+    this.resolveFound = timer(meters, "shortener.resolve", "found");
+    this.resolveNotFound = timer(meters, "shortener.resolve", "not_found");
+    this.resolveError = timer(meters, "shortener.resolve", "error");
   }
 
   public LinkResponse create(CreateLinkRequest request, String owner) {
-    URI url = urlValidator.validate(request.url());
-    String alias = request.customAlias();
-    Link saved =
-        (alias == null || alias.isEmpty())
-            ? createGenerated(url.toString(), owner)
-            : createAlias(alias, url.toString(), owner);
-    afterCommit(() -> cache.putFound(saved.code(), saved.originalUrl()));
-    return LinkResponse.of(saved, baseUrl);
+    Timer.Sample sample = Timer.start();
+    try {
+      URI url = urlValidator.validate(request.url());
+      String alias = request.customAlias();
+      Link saved =
+          (alias == null || alias.isEmpty())
+              ? createGenerated(url.toString(), owner)
+              : createAlias(alias, url.toString(), owner);
+      afterCommit(() -> cache.putFound(saved.code(), saved.originalUrl()));
+      sample.stop(createCreated);
+      return LinkResponse.of(saved, baseUrl);
+    } catch (RuntimeException e) {
+      sample.stop(createFailed);
+      throw e;
+    }
   }
 
   /** Redirect target for an active link. Public: no ownership check. Cache, then DB. */
   public URI resolve(String code) {
-    CacheEntry entry = cache.get(code).orElseGet(() -> loadIntoCache(code));
+    Timer.Sample sample = Timer.start();
+    CacheEntry entry;
+    try {
+      entry = cache.get(code).orElseGet(() -> loadIntoCache(code));
+    } catch (RuntimeException e) {
+      sample.stop(resolveError);
+      throw e;
+    }
     return switch (entry) {
-      case CacheEntry.Found found -> URI.create(found.originalUrl());
-      case CacheEntry.NotFound notFound -> throw new LinkNotFoundException(code);
+      case CacheEntry.Found found -> {
+        sample.stop(resolveFound);
+        yield URI.create(found.originalUrl());
+      }
+      case CacheEntry.NotFound notFound -> {
+        sample.stop(resolveNotFound);
+        throw new LinkNotFoundException(code);
+      }
     };
+  }
+
+  private static Timer timer(MeterRegistry meters, String name, String outcome) {
+    return Timer.builder(name)
+        .tag("outcome", outcome)
+        .publishPercentileHistogram()
+        .register(meters);
   }
 
   private CacheEntry loadIntoCache(String code) {

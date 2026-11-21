@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -173,6 +174,10 @@ class ProblemDetailsHandler extends ResponseEntityExceptionHandler {
     problem.setType(type.uri());
     problem.setTitle(type.title());
     problem.setInstance(URI.create(request.getRequestURI()));
+    String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+    if (correlationId != null) {
+      problem.setProperty("correlationId", correlationId); // matches the logs for this request
+    }
     return problem;
   }
 

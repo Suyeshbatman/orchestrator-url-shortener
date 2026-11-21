@@ -1,5 +1,6 @@
 package com.acme.shortener.config;
 
+import com.acme.shortener.cache.RedisHealthIndicator;
 import com.acme.shortener.cache.RedisLinkCache;
 import com.acme.shortener.cache.TieredLinkCache;
 import com.github.benmanes.caffeine.cache.Ticker;
@@ -8,6 +9,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 @Configuration(proxyBeanMethods = false)
@@ -27,6 +29,13 @@ class CacheConfig {
             .waitDurationInOpenState(b.waitDurationInOpenState())
             .permittedNumberOfCallsInHalfOpenState(b.permittedCallsInHalfOpenState())
             .build());
+  }
+
+  /** Bean name "redis" makes it the {@code redis} health component. */
+  @Bean("redis")
+  RedisHealthIndicator redisHealthIndicator(
+      RedisConnectionFactory connections, CircuitBreaker redisCircuitBreaker) {
+    return new RedisHealthIndicator(connections, redisCircuitBreaker);
   }
 
   @Bean

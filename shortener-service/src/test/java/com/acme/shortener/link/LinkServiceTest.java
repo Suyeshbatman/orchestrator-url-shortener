@@ -19,6 +19,7 @@ import com.acme.shortener.code.InvalidAliasException;
 import com.acme.shortener.config.ShortenerProperties;
 import com.acme.shortener.url.InvalidUrlException;
 import com.acme.shortener.url.UrlValidator;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.net.InetAddress;
 import java.net.URI;
 import java.time.Clock;
@@ -42,6 +43,7 @@ class LinkServiceTest {
       Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
 
   private final LinkRepository repository = mock(LinkRepository.class);
+  private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
   private final AtomicLong ids = new AtomicLong(100);
   private final CodeGenerator codes =
       new CodeGenerator(
@@ -63,11 +65,29 @@ class LinkServiceTest {
     ShortenerProperties props =
         new ShortenerProperties(
             "http://sho.rt/", "", null, null, null, null, null, null, null, null);
-    service = new LinkService(repository, codes, aliases, urls, cache, CLOCK, props);
+    service = new LinkService(repository, codes, aliases, urls, cache, CLOCK, props, meters);
 
     when(repository.save(any(Link.class))).thenAnswer(inv -> inv.getArgument(0));
     when(repository.findByCode(anyString())).thenReturn(Optional.empty());
     when(repository.nextId()).thenAnswer(inv -> ids.incrementAndGet());
+  }
+
+  @Test
+  void createAndResolveAreTimedByOutcome() {
+    String code = service.create(new CreateLinkRequest("https://example.com", null), "me").code();
+    service.resolve(code);
+    assertThatThrownBy(() -> service.resolve("missing")).isInstanceOf(LinkNotFoundException.class);
+    assertThatThrownBy(() -> service.create(new CreateLinkRequest("ftp://example.com", null), "me"))
+        .isInstanceOf(InvalidUrlException.class);
+
+    assertThat(timerCount("shortener.create", "created")).isEqualTo(1);
+    assertThat(timerCount("shortener.create", "failed")).isEqualTo(1);
+    assertThat(timerCount("shortener.resolve", "found")).isEqualTo(1);
+    assertThat(timerCount("shortener.resolve", "not_found")).isEqualTo(1);
+  }
+
+  private long timerCount(String name, String outcome) {
+    return meters.get(name).tag("outcome", outcome).timer().count();
   }
 
   @Test

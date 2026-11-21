@@ -24,16 +24,44 @@ spring:
     redis:
       url: ${REDIS_URL:redis://localhost:6379}
       timeout: 200ms
+  lifecycle:
+    # Graceful shutdown: in-flight requests finish, then the click writer flushes.
+    timeout-per-shutdown-phase: 20s
+
+# JSON logs (Logstash layout, MDC incl. correlationId) when SHORTENER_LOG_FORMAT=logstash;
+# empty = Boot's readable console pattern for local runs.
+logging:
+  structured:
+    format:
+      console: ${SHORTENER_LOG_FORMAT:}
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  health:
+    # Replaced by RedisHealthIndicator, which reports DEGRADED instead of DOWN.
+    redis:
+      enabled: false
   endpoint:
     health:
       probes:
         enabled: true
+      show-components: always
+      status:
+        order: down,out-of-service,degraded,unknown,up
+        http-mapping:
+          degraded: 200
+      group:
+        liveness:
+          include: livenessState
+        # The DB is required; Redis is optional (NFR-2), so it is not part of readiness.
+        readiness:
+          include: readinessState,db
 
 shortener:
   base-url: ${SHORTENER_BASE_URL:http://localhost:8085}

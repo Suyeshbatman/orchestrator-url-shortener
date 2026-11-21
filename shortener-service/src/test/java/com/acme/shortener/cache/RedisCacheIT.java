@@ -2,6 +2,9 @@ package com.acme.shortener.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.acme.shortener.link.CreateLinkRequest;
 import com.acme.shortener.link.LinkNotFoundException;
@@ -20,11 +23,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -36,6 +41,7 @@ import org.testcontainers.utility.DockerImageName;
  * last test stops Redis.
  */
 @SpringBootTest(properties = "shortener.cache.redis-breaker.wait-duration-in-open-state=10m")
+@AutoConfigureMockMvc
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -66,6 +72,7 @@ class RedisCacheIT {
   @Autowired CircuitBreaker redisCircuitBreaker;
   @Autowired MeterRegistry meters;
   @Autowired JdbcTemplate jdbc;
+  @Autowired MockMvc mvc;
 
   @Test
   @Order(1)
@@ -120,5 +127,19 @@ class RedisCacheIT {
     cache.invalidateAllLocal();
     links.resolve(code);
     assertThat((System.nanoTime() - start) / 1_000_000).isLessThan(150); // no Redis timeout paid
+  }
+
+  /** Runs after Redis was stopped: the service reports DEGRADED (200), and stays ready. */
+  @Test
+  @Order(5)
+  void redisDownIsDegradedNotDown() throws Exception {
+    mvc.perform(get("/actuator/health"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("DEGRADED"))
+        .andExpect(jsonPath("$.components.redis.status").value("DEGRADED"))
+        .andExpect(jsonPath("$.components.db.status").value("UP"));
+    mvc.perform(get("/actuator/health/readiness"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("UP"));
   }
 }
