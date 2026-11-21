@@ -1,0 +1,56 @@
+workflow: sdlc-standard
+version: 1
+budgets: { maxWallClock: 30m, maxLlmCalls: 60, maxTokens: 400000 }
+defaults: { retry: { maxAttempts: 2, backoff: exponential, baseDelay: 2s, maxDelay: 20s, jitter: true }, timeout: 5m }
+stages:
+  - id: requirements
+    agent: RequirementsAgent
+    entryGates: [input.nonEmpty]
+    exitGates: [artifact.schemaValid:requirements_spec, spec.noBlockingQuestions]
+    approval: { required: true, reason: "Scope sign-off" }
+  - id: decomposition
+    agent: DecompositionAgent
+    dependsOn: [requirements]
+    exitGates: [artifact.schemaValid:task_graph, taskGraph.acyclic, taskGraph.everyRequirementCovered]
+  - id: impact_analysis
+    agent: ImpactAnalysisAgent
+    dependsOn: [decomposition]
+    condition: "run.mode == 'BROWNFIELD'"          # otherwise SKIPPED (counts as satisfied)
+    exitGates: [artifact.schemaValid:impact_report]
+  - id: design
+    agent: DesignAgent
+    dependsOn: [decomposition, impact_analysis]
+    exitGates: [artifact.schemaValid:design_doc, design.apiContractPresent]
+    approval: { required: true, reason: "Architecture sign-off" }
+  - id: implementation
+    agent: ImplementationAgent
+    dependsOn: [design]
+    expand: tasks                                   # dynamic fan-out per task in task_graph (respects task deps)
+    checkpoint: git
+    retry: { maxAttempts: 3 }
+    fallback: { strategy: minimal-patch }           # smaller-scope prompt, then template
+  - id: test_authoring
+    agent: TestAuthoringAgent
+    dependsOn: [design]                             # parallel with implementation (spec-first tests)
+    checkpoint: git
+  - id: docs_draft
+    agent: DocsAgent
+    dependsOn: [design]                             # parallel
+  - id: validation
+    agent: ValidationAgent                          # deterministic: build, tests, coverage, policy scan
+    dependsOn: [implementation, test_authoring]     # JOIN
+    exitGates: [build.green, tests.green, coverage.min:0.80, policy.noDeny]
+    onFailure: { loopTo: implementation, maxLoops: 2, feedback: validation_report }
+  - id: docs_finalize
+    agent: DocsAgent
+    dependsOn: [validation, docs_draft]             # JOIN
+  - id: release_readiness
+    agent: ReleaseAgent
+    dependsOn: [docs_finalize]
+    exitGates: [release.checklistComplete]
+    approval: { required: true, reason: "Go / no-go" }
+  - id: publish
+    action: git.mergeToMain
+    dependsOn: [release_readiness]
+    highImpact: true
+    approval: { required: true, reason: "Merge to main" }

@@ -11,4 +11,29 @@
   <name>orchestrator-core</name>
   <description>Pure-Java orchestration engine (no Spring)</description>
 
+  <!-- No Spring, JGit or HTTP here. Versions come from the Boot BOM (via the root parent). -->
+  <dependencies>
+    <!-- Workflow YAML; Jackson 3 is also what later steps use for artifact JSON. -->
+    <dependency>
+      <groupId>tools.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-yaml</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.platform</groupId>
+      <artifactId>junit-platform-launcher</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
 </project>
