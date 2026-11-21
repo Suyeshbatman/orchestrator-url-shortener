@@ -6,6 +6,8 @@ public enum EventType {
   STAGE_READY,
   STAGE_STARTED,
   AGENT_INVOKED,
+  /** LLM calls and tokens an attempt used (summed for the budget). */
+  USAGE_RECORDED,
   ARTIFACT_PRODUCED,
   GATE_EVALUATED,
   POLICY_EVALUATED,
@@ -22,6 +24,8 @@ public enum EventType {
   STAGE_INVALIDATED,
   STAGE_SKIPPED,
   BUDGET_EXCEEDED,
+  /** Safe stop begun: nothing new is dispatched; running stages get a grace period. */
+  SAFE_STOP_REQUESTED,
   RUN_HALTED,
   RUN_RESUMED,
   RUN_COMPLETED,

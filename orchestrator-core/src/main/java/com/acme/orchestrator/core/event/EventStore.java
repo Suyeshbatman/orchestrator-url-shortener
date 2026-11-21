@@ -1,5 +1,6 @@
 package com.acme.orchestrator.core.event;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,4 +21,10 @@ public interface EventStore {
 
   /** Every run with at least one event, in creation order. */
   List<String> runIds();
+
+  /**
+   * The clock that stamps events. The engine measures run time (wall-clock budget, approval
+   * timeouts after a restart) with it, so durations agree with the log.
+   */
+  Clock clock();
 }

@@ -264,9 +264,11 @@ class RetryAndLoopTest {
     RunState halted = awaitStatus(RunStatus.HALTED);
     assertThat(halted.statuses()).containsEntry("risky", StageStatus.HALTED);
     assertThat(ofType(EventType.STAGE_FAILED)).isEmpty();
-    assertThat(ofType(EventType.RUN_HALTED).getFirst().payload())
+    assertThat(ofType(EventType.SAFE_STOP_REQUESTED).getFirst().payload())
         .containsEntry("reason", "high-impact stage risky failed: merge conflict")
         .containsEntry("stageId", "risky");
+    assertThat(ofType(EventType.RUN_HALTED).getFirst().payload())
+        .containsEntry("reason", "high-impact stage risky failed: merge conflict");
 
     coordinator.submit(new Command.Resume(Actor.human("alice")));
     awaitStatus(RunStatus.COMPLETED);

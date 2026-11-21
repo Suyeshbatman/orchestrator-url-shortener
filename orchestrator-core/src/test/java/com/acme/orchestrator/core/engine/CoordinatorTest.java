@@ -554,7 +554,7 @@ class CoordinatorTest {
   }
 
   @Test
-  void haltStopsDispatchIgnoresLateResultsAndResumeRunsTheStageAgain() throws Exception {
+  void theKillSwitchStopsAtOnceIgnoresLateResultsAndResumeRunsTheStageAgain() throws Exception {
     CountDownLatch release = new CountDownLatch(1);
     CountDownLatch firstCallStarted = new CountDownLatch(1);
     AtomicInteger calls = new AtomicInteger();
@@ -575,7 +575,7 @@ class CoordinatorTest {
             ctx -> {
               if (calls.incrementAndGet() == 1) {
                 firstCallStarted.countDown();
-                release.await(); // still running when the halt arrives
+                release.await(); // still running when the kill arrives (and is interrupted)
               }
               return AgentResult.success("a", ArtifactOutput.of("x", "{}", ""));
             },
@@ -583,12 +583,12 @@ class CoordinatorTest {
             producer("y", "x")));
 
     firstCallStarted.await(5, TimeUnit.SECONDS);
-    coordinator.submit(new Command.Halt("operator stop", ALICE));
+    coordinator.submit(new Command.Kill("operator stop", ALICE));
     RunState halted = awaitStatus(RunStatus.HALTED);
     assertThat(halted.statuses()).containsEntry("a", StageStatus.HALTED);
     coordinator.submit(new Command.Halt("again", ALICE)); // no-op
 
-    release.countDown(); // the first attempt's result arrives late: it must be ignored
+    release.countDown(); // whatever the first attempt reports now is late: it must be ignored
     coordinator.submit(new Command.Resume(ALICE));
 
     RunState end = awaitStatus(RunStatus.COMPLETED);

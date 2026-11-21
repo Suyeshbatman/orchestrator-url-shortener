@@ -1,5 +1,6 @@
 package com.acme.orchestrator.core.engine;
 
+import com.acme.orchestrator.core.budget.BudgetExceededException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.concurrent.TimeoutException;
@@ -11,10 +12,12 @@ public enum FailureKind {
   /** The work was not good enough (schema or gate failure): retry, loop back or fall back. */
   VALIDATION,
   /** Retrying can't help (policy DENY, missing inputs, illegal state): fail at once. */
-  FATAL;
+  FATAL,
+  /** The run's LLM budget ran out: not the stage's fault; the run is safe-stopped. */
+  BUDGET;
 
   public boolean retryable() {
-    return this != FATAL;
+    return this == TRANSIENT || this == VALIDATION;
   }
 
   /**
@@ -24,6 +27,7 @@ public enum FailureKind {
    */
   public static FailureKind of(Throwable error) {
     return switch (error) {
+      case BudgetExceededException e -> BUDGET;
       case TransientAgentException e -> TRANSIENT;
       case TimeoutException e -> TRANSIENT;
       case IOException e -> TRANSIENT;

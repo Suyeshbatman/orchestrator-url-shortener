@@ -1,5 +1,6 @@
 package com.acme.orchestrator.core.engine;
 
+import com.acme.orchestrator.core.budget.Usage;
 import com.acme.orchestrator.core.event.Actor;
 import com.acme.orchestrator.core.model.ArtifactRef;
 import java.util.List;
@@ -24,7 +25,8 @@ public sealed interface Command {
       AgentResult.Success result,
       List<ArtifactRef> reads,
       List<PolicyCheck> checks,
-      OptionalInt reportedRisk)
+      OptionalInt reportedRisk,
+      Usage usage)
       implements Command {
     public StageCompleted {
       Objects.requireNonNull(stageKey, "stageKey");
@@ -32,18 +34,25 @@ public sealed interface Command {
       reads = List.copyOf(reads);
       checks = List.copyOf(checks);
       Objects.requireNonNull(reportedRisk, "reportedRisk");
+      Objects.requireNonNull(usage, "usage");
     }
   }
 
   /** An attempt failed: the agent said so, threw, or timed out. */
   record StageFailed(
-      String stageKey, long dispatch, String reason, FailureKind kind, List<PolicyCheck> checks)
+      String stageKey,
+      long dispatch,
+      String reason,
+      FailureKind kind,
+      List<PolicyCheck> checks,
+      Usage usage)
       implements Command {
     public StageFailed {
       Objects.requireNonNull(stageKey, "stageKey");
       Objects.requireNonNull(reason, "reason");
       Objects.requireNonNull(kind, "kind");
       checks = List.copyOf(checks);
+      Objects.requireNonNull(usage, "usage");
     }
   }
 
@@ -79,9 +88,32 @@ public sealed interface Command {
     }
   }
 
-  /** Safe stop: dispatch nothing more; results still in flight are ignored. */
+  /**
+   * Safe stop: dispatch nothing more, let running attempts finish within the grace period (then
+   * cancel them), take a checkpoint, halt. Resume continues.
+   */
   record Halt(String reason, Actor by) implements Command {
     public Halt {
+      Objects.requireNonNull(reason, "reason");
+      Objects.requireNonNull(by, "by");
+    }
+  }
+
+  /** Kill switch: a safe stop without the grace period (running attempts are cancelled now). */
+  record Kill(String reason, Actor by) implements Command {
+    public Kill {
+      Objects.requireNonNull(reason, "reason");
+      Objects.requireNonNull(by, "by");
+    }
+  }
+
+  /**
+   * Restore the checkpoint taken before {@code stageId} and mark it and everything downstream
+   * ROLLED_BACK; they run again (on resume, if the run is halted).
+   */
+  record Rollback(String stageId, String reason, Actor by) implements Command {
+    public Rollback {
+      Objects.requireNonNull(stageId, "stageId");
       Objects.requireNonNull(reason, "reason");
       Objects.requireNonNull(by, "by");
     }
@@ -113,6 +145,12 @@ public sealed interface Command {
       Objects.requireNonNull(stageKey, "stageKey");
     }
   }
+
+  /** Internal: a safe stop's grace period ended ({@code request}: its SAFE_STOP_REQUESTED seq). */
+  record GraceExpired(long request) implements Command {}
+
+  /** Internal: the wall-clock budget may have run out. */
+  record BudgetCheck() implements Command {}
 
   /** Internal: run a scheduling pass (sent once at start). */
   record Wake() implements Command {}

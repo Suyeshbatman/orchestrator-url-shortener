@@ -333,12 +333,17 @@ class ApprovalFlowTest {
 
     RunState halted = awaitStatus(RunStatus.HALTED);
     assertThat(halted.statuses()).containsEntry("a", StageStatus.HALTED);
-    assertThat(ofType(EventType.RUN_HALTED))
+    assertThat(ofType(EventType.SAFE_STOP_REQUESTED))
         .singleElement()
         .satisfies(e ->
             assertThat(e.payload())
                 .containsEntry("reason", "approval of a was not given within PT0.2S")
                 .containsEntry("stageId", "a"));
+    assertThat(ofType(EventType.RUN_HALTED))
+        .singleElement()
+        .satisfies(e ->
+            assertThat(e.payload())
+                .containsEntry("reason", "approval of a was not given within PT0.2S"));
     assertThat(ofType(EventType.APPROVAL_REQUESTED).getFirst().payload())
         .containsEntry("timeout", "PT0.2S");
 

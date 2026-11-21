@@ -25,7 +25,7 @@ import java.util.Optional;
  * STAGE_STARTED → START, …). Rules for events that imply more:
  *
  * <ul>
- *   <li>STAGE_READY on an INVALIDATED stage first resets it (a new loop), then marks it ready.
+ *   <li>STAGE_READY on an INVALIDATED or ROLLED_BACK stage first resets it, then marks it ready.
  *   <li>FALLBACK_USED, like STAGE_RETRIED, schedules another attempt (RUNNING → RETRYING).
  *   <li>RUN_HALTED halts every stage that is in progress (PENDING, READY, RUNNING,
  *       WAITING_APPROVAL, RETRYING); RUN_RESUMED resets every HALTED stage to PENDING.
@@ -132,7 +132,9 @@ public final class RunStateProjector {
             .map(t -> StageInstance.pendingTask(run.id(), stageId, t))
             .orElseGet(() -> StageInstance.pending(run.id(), stageId));
     StageInstance current = stages.getOrDefault(fresh.key(), fresh);
-    if (event == StageEvent.DEPENDENCIES_MET && current.status() == StageStatus.INVALIDATED) {
+    if (event == StageEvent.DEPENDENCIES_MET
+        && (current.status() == StageStatus.INVALIDATED
+            || current.status() == StageStatus.ROLLED_BACK)) {
       current = current.apply(StageEvent.RESET, at);
     }
     stages.put(current.key(), current.apply(event, at));

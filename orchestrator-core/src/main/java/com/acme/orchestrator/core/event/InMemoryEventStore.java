@@ -50,4 +50,9 @@ public final class InMemoryEventStore implements EventStore {
   public synchronized List<String> runIds() {
     return List.copyOf(runs.keySet());
   }
+
+  @Override
+  public Clock clock() {
+    return clock;
+  }
 }

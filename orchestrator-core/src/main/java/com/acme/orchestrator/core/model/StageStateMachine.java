@@ -27,6 +27,7 @@ import static com.acme.orchestrator.core.model.StageStatus.WAITING_APPROVAL;
 
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -42,12 +43,15 @@ import java.util.Optional;
  *                  FAIL→FAILED  INVALIDATE→INVALIDATED  HALT→HALTED
  * WAITING_APPROVAL APPROVE→SUCCEEDED  REJECT→RETRYING  INVALIDATE→INVALIDATED  HALT→HALTED
  * RETRYING         START→RUNNING  FAIL→FAILED  HALT→HALTED
- * SUCCEEDED        INVALIDATE→INVALIDATED  ROLL_BACK→ROLLED_BACK
- * FAILED           INVALIDATE→INVALIDATED  ROLL_BACK→ROLLED_BACK
+ * SUCCEEDED        INVALIDATE→INVALIDATED
+ * FAILED           INVALIDATE→INVALIDATED
  * SKIPPED          INVALIDATE→INVALIDATED
  * INVALIDATED      RESET→PENDING
  * HALTED           RESET→PENDING   (resume)
- * ROLLED_BACK      (final)
+ * ROLLED_BACK      RESET→PENDING   (it runs again)
+ *
+ * ROLL_BACK→ROLLED_BACK from every status that has started: READY, RUNNING, WAITING_APPROVAL,
+ * RETRYING, SUCCEEDED, FAILED, SKIPPED, INVALIDATED, HALTED.
  * </pre>
  */
 public final class StageStateMachine {
@@ -116,6 +120,11 @@ public final class StageStateMachine {
     t.get(INVALIDATED).put(RESET, PENDING);
 
     t.get(HALTED).put(RESET, PENDING);
+    t.get(ROLLED_BACK).put(RESET, PENDING);
+    for (StageStatus started :
+        List.of(READY, RUNNING, WAITING_APPROVAL, RETRYING, SKIPPED, INVALIDATED, HALTED)) {
+      t.get(started).put(ROLL_BACK, ROLLED_BACK); // SUCCEEDED and FAILED are listed above
+    }
 
     t.replaceAll((status, events) -> Collections.unmodifiableMap(events));
     return Collections.unmodifiableMap(t);

@@ -37,8 +37,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * Every (status, event) pair: the 28 legal ones must land where this independent copy of the table
- * says, and the other 115 must throw.
+ * Every (status, event) pair: the 36 legal ones must land where this independent copy of the table
+ * says, and the other 107 must throw.
  */
 class StageStateMachineTest {
 
@@ -48,16 +48,12 @@ class StageStateMachineTest {
           Map.entry(
               READY,
               Map.of(
-                  START,
-                  RUNNING,
-                  SKIP,
-                  SKIPPED,
-                  FAIL,
-                  FAILED,
-                  INVALIDATE,
-                  INVALIDATED,
-                  HALT,
-                  HALTED)),
+                  START, RUNNING,
+                  SKIP, SKIPPED,
+                  FAIL, FAILED,
+                  INVALIDATE, INVALIDATED,
+                  HALT, HALTED,
+                  ROLL_BACK, ROLLED_BACK)),
           Map.entry(
               RUNNING,
               Map.of(
@@ -66,17 +62,24 @@ class StageStateMachineTest {
                   SCHEDULE_RETRY, RETRYING,
                   FAIL, FAILED,
                   INVALIDATE, INVALIDATED,
-                  HALT, HALTED)),
+                  HALT, HALTED,
+                  ROLL_BACK, ROLLED_BACK)),
           Map.entry(
               WAITING_APPROVAL,
-              Map.of(APPROVE, SUCCEEDED, REJECT, RETRYING, INVALIDATE, INVALIDATED, HALT, HALTED)),
-          Map.entry(RETRYING, Map.of(START, RUNNING, FAIL, FAILED, HALT, HALTED)),
+              Map.of(
+                  APPROVE, SUCCEEDED,
+                  REJECT, RETRYING,
+                  INVALIDATE, INVALIDATED,
+                  HALT, HALTED,
+                  ROLL_BACK, ROLLED_BACK)),
+          Map.entry(
+              RETRYING, Map.of(START, RUNNING, FAIL, FAILED, HALT, HALTED, ROLL_BACK, ROLLED_BACK)),
           Map.entry(SUCCEEDED, Map.of(INVALIDATE, INVALIDATED, ROLL_BACK, ROLLED_BACK)),
           Map.entry(FAILED, Map.of(INVALIDATE, INVALIDATED, ROLL_BACK, ROLLED_BACK)),
-          Map.entry(SKIPPED, Map.of(INVALIDATE, INVALIDATED)),
-          Map.entry(INVALIDATED, Map.of(RESET, PENDING)),
-          Map.entry(HALTED, Map.of(RESET, PENDING)),
-          Map.entry(ROLLED_BACK, Map.of()));
+          Map.entry(SKIPPED, Map.of(INVALIDATE, INVALIDATED, ROLL_BACK, ROLLED_BACK)),
+          Map.entry(INVALIDATED, Map.of(RESET, PENDING, ROLL_BACK, ROLLED_BACK)),
+          Map.entry(HALTED, Map.of(RESET, PENDING, ROLL_BACK, ROLLED_BACK)),
+          Map.entry(ROLLED_BACK, Map.of(RESET, PENDING)));
 
   static Stream<Arguments> legal() {
     List<Arguments> args = new ArrayList<>();
@@ -122,9 +125,9 @@ class StageStateMachineTest {
 
   @Test
   void tableCoversEveryStatusAndMatchesExactly() {
-    assertThat(legal().count()).isEqualTo(28);
+    assertThat(legal().count()).isEqualTo(36);
     assertThat(illegal().count())
-        .isEqualTo((long) StageStatus.values().length * StageEvent.values().length - 28);
+        .isEqualTo((long) StageStatus.values().length * StageEvent.values().length - 36);
     for (StageStatus s : StageStatus.values()) {
       assertThat(StageStateMachine.allowed(s)).isEqualTo(EXPECTED.get(s));
     }

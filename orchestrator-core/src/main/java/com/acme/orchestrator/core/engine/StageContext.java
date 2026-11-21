@@ -1,6 +1,9 @@
 package com.acme.orchestrator.core.engine;
 
 import com.acme.orchestrator.core.artifact.ArtifactStore;
+import com.acme.orchestrator.core.budget.BudgetExceededException;
+import com.acme.orchestrator.core.budget.BudgetGuard;
+import com.acme.orchestrator.core.budget.Usage;
 import com.acme.orchestrator.core.model.Artifact;
 import com.acme.orchestrator.core.model.ArtifactRef;
 import com.acme.orchestrator.core.model.Run;
@@ -34,6 +37,8 @@ public final class StageContext {
   private final ToolRegistry tools;
   private final PolicyEngine policies;
   private final Optional<String> fallbackStrategy;
+  private final BudgetGuard budget;
+  private Usage usage = Usage.NONE;
   private final Set<ArtifactRef> reads = new LinkedHashSet<>();
   private final List<PolicyCheck> checks = new ArrayList<>();
   private Integer reportedRisk;
@@ -46,7 +51,8 @@ public final class StageContext {
       ArtifactStore artifacts,
       ToolRegistry tools,
       PolicyEngine policies,
-      Optional<String> fallbackStrategy) {
+      Optional<String> fallbackStrategy,
+      BudgetGuard budget) {
     this.run = run;
     this.stageKey = stageKey;
     this.attempt = attempt;
@@ -55,6 +61,7 @@ public final class StageContext {
     this.tools = tools;
     this.policies = policies;
     this.fallbackStrategy = fallbackStrategy;
+    this.budget = budget;
   }
 
   public Run run() {
@@ -124,6 +131,32 @@ public final class StageContext {
       throw new IllegalArgumentException("risk score must be 0-100, was " + score);
     }
     reportedRisk = reportedRisk == null ? score : Math.max(reportedRisk, score);
+  }
+
+  /**
+   * Call before each LLM call (the LLM gateway does).
+   *
+   * @throws BudgetExceededException if the run has no LLM calls or tokens left; the attempt then
+   *     ends and the run is safe-stopped
+   */
+  public void beforeLlmCall() {
+    budget.beforeLlmCall();
+  }
+
+  /** Call after each LLM call: charges the run's budget and is recorded for the audit log. */
+  public void recordLlmCall(long inputTokens, long outputTokens) {
+    if (inputTokens < 0 || outputTokens < 0) {
+      throw new IllegalArgumentException("token counts must not be negative");
+    }
+    Usage call = new Usage(1, inputTokens + outputTokens);
+    budget.charge(call);
+    synchronized (this) {
+      usage = usage.plus(call);
+    }
+  }
+
+  synchronized Usage usage() {
+    return usage;
   }
 
   synchronized List<ArtifactRef> reads() {

@@ -5,15 +5,19 @@ import static com.acme.orchestrator.core.event.EventType.APPROVAL_GRANTED;
 import static com.acme.orchestrator.core.event.EventType.APPROVAL_REJECTED;
 import static com.acme.orchestrator.core.event.EventType.APPROVAL_REQUESTED;
 import static com.acme.orchestrator.core.event.EventType.ARTIFACT_PRODUCED;
+import static com.acme.orchestrator.core.event.EventType.BUDGET_EXCEEDED;
+import static com.acme.orchestrator.core.event.EventType.CHECKPOINT_CREATED;
 import static com.acme.orchestrator.core.event.EventType.FALLBACK_USED;
 import static com.acme.orchestrator.core.event.EventType.GATE_EVALUATED;
 import static com.acme.orchestrator.core.event.EventType.POLICY_EVALUATED;
 import static com.acme.orchestrator.core.event.EventType.REPLAN_TRIGGERED;
+import static com.acme.orchestrator.core.event.EventType.ROLLED_BACK;
 import static com.acme.orchestrator.core.event.EventType.RUN_COMPLETED;
 import static com.acme.orchestrator.core.event.EventType.RUN_CREATED;
 import static com.acme.orchestrator.core.event.EventType.RUN_FAILED;
 import static com.acme.orchestrator.core.event.EventType.RUN_HALTED;
 import static com.acme.orchestrator.core.event.EventType.RUN_RESUMED;
+import static com.acme.orchestrator.core.event.EventType.SAFE_STOP_REQUESTED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_FAILED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_INVALIDATED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_READY;
@@ -21,19 +25,28 @@ import static com.acme.orchestrator.core.event.EventType.STAGE_RETRIED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_SKIPPED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_STARTED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_SUCCEEDED;
+import static com.acme.orchestrator.core.event.EventType.USAGE_RECORDED;
 import static com.acme.orchestrator.core.event.RunStateProjector.AUTONOMY_HASH;
 import static com.acme.orchestrator.core.event.RunStateProjector.POLICIES_HASH;
 
 import com.acme.orchestrator.core.artifact.ArtifactDraft;
 import com.acme.orchestrator.core.artifact.ArtifactStore;
+import com.acme.orchestrator.core.budget.BudgetGuard;
+import com.acme.orchestrator.core.budget.Usage;
+import com.acme.orchestrator.core.checkpoint.CheckpointManager;
+import com.acme.orchestrator.core.checkpoint.CheckpointRef;
 import com.acme.orchestrator.core.dag.Dag;
 import com.acme.orchestrator.core.dag.WorkflowGraph;
 import com.acme.orchestrator.core.engine.Command.AmendRequirement;
 import com.acme.orchestrator.core.engine.Command.ApprovalDecision;
 import com.acme.orchestrator.core.engine.Command.ApprovalTimeout;
+import com.acme.orchestrator.core.engine.Command.BudgetCheck;
+import com.acme.orchestrator.core.engine.Command.GraceExpired;
 import com.acme.orchestrator.core.engine.Command.Halt;
+import com.acme.orchestrator.core.engine.Command.Kill;
 import com.acme.orchestrator.core.engine.Command.Resume;
 import com.acme.orchestrator.core.engine.Command.RetryDue;
+import com.acme.orchestrator.core.engine.Command.Rollback;
 import com.acme.orchestrator.core.engine.Command.StageCompleted;
 import com.acme.orchestrator.core.engine.Command.StageFailed;
 import com.acme.orchestrator.core.engine.Command.Wake;
@@ -45,6 +58,7 @@ import com.acme.orchestrator.core.event.EventType;
 import com.acme.orchestrator.core.event.RunState;
 import com.acme.orchestrator.core.event.RunStateProjector;
 import com.acme.orchestrator.core.model.Artifact;
+import com.acme.orchestrator.core.model.CheckpointKind;
 import com.acme.orchestrator.core.model.Condition;
 import com.acme.orchestrator.core.model.Executor;
 import com.acme.orchestrator.core.model.GateCatalog;
@@ -66,6 +80,7 @@ import com.acme.orchestrator.core.policy.PolicyMatch;
 import com.acme.orchestrator.core.policy.PolicySet;
 import com.acme.orchestrator.core.policy.ProposedAction;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -77,8 +92,10 @@ import java.util.OptionalInt;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -102,9 +119,14 @@ import java.util.stream.Stream;
  * agent finishes, its artifacts are stored, exit gates evaluated, and the stage succeeds, waits for
  * approval, or fails.
  *
- * <p>Not yet (later steps): retries, fallback and loop-back (4.4), the full approval rules (4.3),
- * re-planning (4.5), recovery of attempts in flight at a crash (4.4), task expansion (Phase 5).
- * Until then any failure stops new dispatches and fails the run once in-flight work has finished.
+ * <p>Failures are retried, looped back or fallen back (see {@link #failAttempt}); stages with
+ * {@code checkpoint} get a checkpoint before they start, restored when an attempt that wrote files
+ * fails and on rollback. A safe stop (halt, kill switch, budget, approval timeout, high-impact
+ * failure, repeated policy DENY) dispatches nothing new, lets running attempts finish within the
+ * grace period, checkpoints and halts. Starting a coordinator on an existing log recovers: attempts
+ * that were running are retried, timers are re-armed.
+ *
+ * <p>Not yet: re-planning (4.5), task expansion (Phase 5).
  */
 public final class Coordinator implements AutoCloseable {
 
@@ -113,10 +135,18 @@ public final class Coordinator implements AutoCloseable {
   /** Recorded when someone without authority tries to approve (see {@link Invariant}). */
   static final String HUMAN_APPROVER_POLICY = "INV-human-approver";
 
+  /** How long a safe stop waits for running attempts before cancelling them. */
+  public static final Duration DEFAULT_SAFE_STOP_GRACE = Duration.ofSeconds(30);
+
+  /** Policy DENYs (since the last resume) that make the run safe-stop. */
+  static final int MAX_DENIALS = 3;
+
   /**
    * What the coordinator works with.
    *
    * @param policies loaded once at run start; their hashes are recorded in RUN_CREATED
+   * @param checkpoints saves and restores the run's workspace
+   * @param safeStopGrace how long a safe stop lets running attempts finish
    */
   public record Services(
       EventStore events,
@@ -124,7 +154,9 @@ public final class Coordinator implements AutoCloseable {
       AgentRegistry agents,
       GateEvaluator gates,
       ToolRegistry tools,
-      PolicyEngine policies) {
+      PolicyEngine policies,
+      CheckpointManager checkpoints,
+      Duration safeStopGrace) {
 
     public Services {
       Objects.requireNonNull(events, "events");
@@ -133,6 +165,38 @@ public final class Coordinator implements AutoCloseable {
       Objects.requireNonNull(gates, "gates");
       Objects.requireNonNull(tools, "tools");
       Objects.requireNonNull(policies, "policies");
+      Objects.requireNonNull(checkpoints, "checkpoints");
+      if (safeStopGrace == null || safeStopGrace.isNegative()) {
+        throw new IllegalArgumentException("safeStopGrace must be zero or more");
+      }
+    }
+
+    /** No checkpoints and the default grace period. */
+    public Services(
+        EventStore events,
+        ArtifactStore artifacts,
+        AgentRegistry agents,
+        GateEvaluator gates,
+        ToolRegistry tools,
+        PolicyEngine policies) {
+      this(
+          events,
+          artifacts,
+          agents,
+          gates,
+          tools,
+          policies,
+          CheckpointManager.NONE,
+          DEFAULT_SAFE_STOP_GRACE);
+    }
+
+    public Services withCheckpoints(CheckpointManager manager) {
+      return new Services(
+          events, artifacts, agents, gates, tools, policies, manager, safeStopGrace);
+    }
+
+    public Services withSafeStopGrace(Duration grace) {
+      return new Services(events, artifacts, agents, gates, tools, policies, checkpoints, grace);
     }
 
     /** Without config policies (the invariants still apply). */
@@ -172,6 +236,18 @@ public final class Coordinator implements AutoCloseable {
 
   /** Stage key → seq of its STAGE_RETRIED awaiting the backoff. Coordinator thread only. */
   private final Map<String, Long> retryTimers = new LinkedHashMap<>();
+
+  /** Stage key → the worker running its attempt (cancelled on kill or after the grace). */
+  private final Map<String, Future<?>> running = new ConcurrentHashMap<>();
+
+  /** Set while a safe stop waits for running attempts. Coordinator thread only. */
+  private SafeStop stopping;
+
+  private record SafeStop(String reason, Actor by, long request, List<String> notes) {}
+
+  private BudgetGuard budget;
+
+  private Instant createdAt;
 
   private boolean broken;
 
@@ -246,9 +322,94 @@ public final class Coordinator implements AutoCloseable {
       }
     }
     refresh();
+    createdAt = services.events().events(runId).getFirst().timestamp();
+    budget = new BudgetGuard(current.run().budgets(), usedSoFar());
+    recover();
     publish();
     loop.start();
+    later(budget.wallClockLeft(elapsed()), new BudgetCheck());
     inbox.add(new Wake());
+  }
+
+  /**
+   * Continues a run whose coordinator stopped (crash or restart): attempts that were running are
+   * lost, so they count as transient failures (retried if attempts remain); pending retries,
+   * approval timeouts and an unfinished safe stop are picked up again.
+   */
+  private void recover() {
+    List<Event> log = services.events().events(runId);
+    // a safe stop that was requested but never finished: it finishes now (nothing is running)
+    for (int i = log.size() - 1; i >= 0; i--) {
+      Event e = log.get(i);
+      if (e.type() == RUN_HALTED || e.type() == RUN_RESUMED) {
+        break;
+      }
+      if (e.type() == SAFE_STOP_REQUESTED) {
+        stopping =
+            new SafeStop(
+                e.payloadString("reason").orElse("safe stop"),
+                e.actor(),
+                e.seq(),
+                new ArrayList<>());
+        break;
+      }
+    }
+    for (StageInstance stage : List.copyOf(current.stages().values())) {
+      String key = stage.key();
+      switch (stage.status()) {
+        case RUNNING ->
+            failAttempt(
+                key,
+                "interrupted: the coordinator stopped while this attempt was running",
+                FailureKind.TRANSIENT,
+                Actor.SYSTEM);
+        case RETRYING -> {
+          long retry = stageEvents(key).getLast().seq();
+          retryTimers.put(key, retry);
+          later(Duration.ZERO, new RetryDue(key, retry));
+        }
+        case WAITING_APPROVAL ->
+            stageEvents(key).stream()
+                .filter(e -> e.type() == APPROVAL_REQUESTED)
+                .reduce((first, second) -> second)
+                .ifPresent(request -> {
+                  approvalRequests.put(key, request.seq());
+                  stages
+                      .get(key)
+                      .approval()
+                      .timeout()
+                      .ifPresent(t -> {
+                        Duration waited =
+                            Duration.between(
+                                request.timestamp(), services.events().clock().instant());
+                        Duration left = t.minus(waited);
+                        later(
+                            left.isNegative() ? Duration.ZERO : left,
+                            new ApprovalTimeout(key, request.seq()));
+                      });
+                });
+        default -> {}
+      }
+    }
+  }
+
+  private Usage usedSoFar() {
+    Usage used = Usage.NONE;
+    for (Event e : services.events().events(runId)) {
+      if (e.type() == USAGE_RECORDED) {
+        used =
+            used.plus(
+                new Usage(
+                    ((Number) e.payload().get("llmCalls")).longValue(),
+                    ((Number) e.payload().get("tokens")).longValue()));
+      }
+    }
+    return used;
+  }
+
+  private Duration elapsed() {
+    Duration d = Duration.between(createdAt, services.events().clock().instant());
+    return d.isNegative() ? Duration.ZERO : d;
   }
 
   public String runId() {
@@ -328,6 +489,7 @@ public final class Coordinator implements AutoCloseable {
       }
       try {
         handle(command);
+        checkBudgets();
         schedule();
       } catch (RuntimeException e) {
         broken = true; // a bug or a corrupt log: stop acting rather than guess
@@ -347,12 +509,15 @@ public final class Coordinator implements AutoCloseable {
       case ApprovalTimeout t -> onApprovalTimeout(t);
       case RetryDue r -> onRetryDue(r);
       case AmendRequirement a -> runEvent(REPLAN_TRIGGERED, a.by(), Map.of("amendment", a.text()));
-      case Halt h -> {
-        RunStatus status = current.run().status();
-        if (!status.isTerminal() && status != RunStatus.HALTED) {
-          runEvent(RUN_HALTED, h.by(), Map.of("reason", h.reason()));
+      case Halt h -> requestSafeStop(h.reason(), h.by(), false, Map.of());
+      case Kill k -> requestSafeStop(k.reason(), k.by(), true, Map.of());
+      case GraceExpired g -> {
+        if (stopping != null && stopping.request() == g.request()) {
+          finishSafeStop();
         }
       }
+      case BudgetCheck b -> {} // checkBudgets() runs after every command
+      case Rollback r -> onRollback(r);
       case Resume r -> {
         if (current.run().status() == RunStatus.HALTED) {
           runEvent(RUN_RESUMED, r.by(), Map.of());
@@ -386,6 +551,12 @@ public final class Coordinator implements AutoCloseable {
         runEvent(RUN_COMPLETED, Actor.SYSTEM, Map.of());
         return;
       }
+      if (stopping != null) {
+        if (inFlight.isEmpty()) {
+          finishSafeStop();
+        }
+        return; // a safe stop dispatches nothing new
+      }
       List<String> ready = dag.readyNodes(schedulable());
       if (ready.isEmpty()) {
         return; // waiting for agents or approvals
@@ -414,6 +585,19 @@ public final class Coordinator implements AutoCloseable {
       // the inputs are what they are: retrying the stage can't help
       failAttempt(stageId, entryFailure.get(), FailureKind.FATAL, Actor.SYSTEM);
       return;
+    }
+    if (def.checkpoint() != CheckpointKind.NONE) {
+      try {
+        CheckpointRef ref = services.checkpoints().create(runId, stageId);
+        stageEvent(
+            CHECKPOINT_CREATED,
+            stageId,
+            Actor.SYSTEM,
+            Map.of("checkpointId", ref.id(), "before", stageId));
+      } catch (RuntimeException e) {
+        failAttempt(stageId, "could not create checkpoint: " + e, FailureKind.FATAL, Actor.SYSTEM);
+        return;
+      }
     }
     dispatch(stageId, def);
   }
@@ -448,19 +632,34 @@ public final class Coordinator implements AutoCloseable {
             services.artifacts(),
             services.tools(),
             services.policies(),
-            fallback);
+            fallback,
+            budget);
     Duration timeout = def.timeout();
-    CompletableFuture.supplyAsync(() -> execute(agent, context), workers)
+    CompletableFuture<AgentResult> result = new CompletableFuture<>();
+    Future<?> task =
+        workers.submit(() -> {
+          try {
+            result.complete(agent.execute(context));
+          } catch (Throwable t) {
+            result.completeExceptionally(t);
+          }
+        });
+    running.put(stageId, task);
+    result
         .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
-        .whenComplete((result, error) -> {
+        .whenComplete((r, error) -> {
+          task.cancel(true); // a timed-out agent is interrupted, not left running
+          running.remove(stageId, task);
           if (!closed) {
-            inbox.add(outcome(stageId, dispatch, context, timeout, result, error));
+            inbox.add(outcome(stageId, dispatch, context, timeout, r, error));
           }
         });
   }
 
   private void onCompleted(StageCompleted c) {
+    recordUsage(c.stageKey(), c.usage());
     recordChecks(c.stageKey(), c.checks());
+    checkDenials(c.checks());
     if (!isCurrentAttempt(c.stageKey(), c.dispatch())) {
       return; // stale: the stage was halted or moved on while the agent ran
     }
@@ -591,10 +790,20 @@ public final class Coordinator implements AutoCloseable {
   }
 
   private void onFailed(StageFailed f) {
+    recordUsage(f.stageKey(), f.usage());
     recordChecks(f.stageKey(), f.checks());
-    if (isCurrentAttempt(f.stageKey(), f.dispatch())) {
-      failAttempt(f.stageKey(), f.reason(), f.kind(), actorOf(stages.get(f.stageKey())));
+    checkDenials(f.checks());
+    if (!isCurrentAttempt(f.stageKey(), f.dispatch())) {
+      return;
     }
+    if (f.kind() == FailureKind.BUDGET) {
+      // not the stage's fault: stop the run; the stage re-runs on resume (if the budget allows)
+      runEvent(
+          BUDGET_EXCEEDED, Actor.SYSTEM, Map.of("reason", f.reason(), "stageId", f.stageKey()));
+      requestSafeStop(f.reason(), Actor.SYSTEM, false, Map.of());
+      return;
+    }
+    failAttempt(f.stageKey(), f.reason(), f.kind(), actorOf(stages.get(f.stageKey())));
   }
 
   private void onApproval(ApprovalDecision d) {
@@ -639,11 +848,14 @@ public final class Coordinator implements AutoCloseable {
     }
 
     stageEvent(APPROVAL_REJECTED, d.stageKey(), d.approver(), payload); // → RETRYING
+    restoreIfWritten(d.stageKey()); // the rejected work is discarded
     invalidateDownstream(d.stageKey(), "upstream " + d.stageKey() + " was rejected");
     StageDefinition def = stages.get(d.stageKey());
     int used = current.stages().get(d.stageKey()).attempt();
     int allowed = def.retry().maxAttempts();
-    if (used < allowed) {
+    if (stopping != null) {
+      stopping.notes().add(d.stageKey() + " was rejected; it re-runs on resume");
+    } else if (used < allowed) {
       dispatch(d.stageKey(), def); // the comment reaches the agent through feedback()
     } else {
       failAttempt(
@@ -667,18 +879,223 @@ public final class Coordinator implements AutoCloseable {
         && Long.valueOf(t.request()).equals(approvalRequests.get(t.stageKey()))
         && current.run().status() != RunStatus.HALTED) {
       approvalRequests.remove(t.stageKey());
-      runEvent(
-          RUN_HALTED,
+      requestSafeStop(
+          "approval of "
+              + t.stageKey()
+              + " was not given within "
+              + stages.get(t.stageKey()).approval().timeout().orElseThrow(),
           Actor.SYSTEM,
-          Map.of(
-              "reason",
-              "approval of "
-                  + t.stageKey()
-                  + " was not given within "
-                  + stages.get(t.stageKey()).approval().timeout().orElseThrow(),
-              "stageId",
-              t.stageKey()));
+          false,
+          Map.of("stageId", t.stageKey()));
     }
+  }
+
+  // ---- safe stop, budgets, rollback -----------------------------------------------------------
+
+  /**
+   * Begins a safe stop: nothing new is dispatched; running attempts may finish within the grace
+   * period (no grace for {@code immediate}, the kill switch); then it checkpoints and halts.
+   * Repeated requests are no-ops, except that a kill cuts a running grace period short.
+   */
+  private void requestSafeStop(String reason, Actor by, boolean immediate, Map<String, ?> details) {
+    RunStatus status = current.run().status();
+    if (status.isTerminal() || status == RunStatus.HALTED) {
+      return;
+    }
+    if (stopping != null) {
+      if (immediate) {
+        finishSafeStop();
+      }
+      return;
+    }
+    Duration grace = immediate ? Duration.ZERO : services.safeStopGrace();
+    Map<String, Object> payload = new LinkedHashMap<>(details);
+    payload.put("reason", reason);
+    payload.put("grace", grace);
+    payload.put("running", List.copyOf(inFlight.keySet()));
+    runEvent(SAFE_STOP_REQUESTED, by, payload);
+    stopping = new SafeStop(reason, by, current.lastSeq(), new ArrayList<>());
+    if (inFlight.isEmpty() || grace.isZero()) {
+      finishSafeStop();
+    } else {
+      later(grace, new GraceExpired(stopping.request()));
+    }
+  }
+
+  /** Cancels what still runs, checkpoints the workspace and halts the run. */
+  private void finishSafeStop() {
+    SafeStop stop = stopping;
+    stopping = null;
+    List<String> cancelled = List.copyOf(inFlight.keySet());
+    inFlight.clear(); // anything that still reports back is stale
+    running.values().forEach(task -> task.cancel(true));
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("reason", stop.reason());
+    if (!cancelled.isEmpty()) {
+      payload.put("cancelled", cancelled);
+    }
+    if (!stop.notes().isEmpty()) {
+      payload.put("notes", List.copyOf(stop.notes()));
+    }
+    try {
+      CheckpointRef ref = services.checkpoints().create(runId, "safe-stop");
+      runEvent(
+          CHECKPOINT_CREATED,
+          Actor.SYSTEM,
+          Map.of("checkpointId", ref.id(), "reason", "safe stop"));
+      payload.put("checkpointId", ref.id());
+    } catch (RuntimeException e) {
+      payload.put("checkpointError", e.toString()); // halting matters more than the checkpoint
+    }
+    runEvent(RUN_HALTED, stop.by(), payload);
+  }
+
+  /** Safe-stops the run once a budget is exceeded (checked after every command). */
+  private void checkBudgets() {
+    RunStatus status = current.run().status();
+    if (status.isTerminal() || status == RunStatus.HALTED || stopping != null) {
+      return;
+    }
+    budget
+        .check(elapsed())
+        .ifPresent(exceeded -> {
+          runEvent(
+              BUDGET_EXCEEDED,
+              Actor.SYSTEM,
+              Map.of(
+                  "budget", exceeded.budget(),
+                  "limit", exceeded.limit(),
+                  "used", exceeded.used()));
+          requestSafeStop(
+              exceeded.describe(), Actor.SYSTEM, false, Map.of("budget", exceeded.budget()));
+        });
+  }
+
+  /** An attempt's LLM use goes into the log, so the budget survives a restart. */
+  private void recordUsage(String stageKey, Usage usage) {
+    if (usage.llmCalls() > 0 || usage.tokens() > 0) {
+      stageEvent(
+          USAGE_RECORDED,
+          stageKey,
+          actorOf(stages.get(stageKey)),
+          Map.of("llmCalls", usage.llmCalls(), "tokens", usage.tokens()));
+    }
+  }
+
+  /** Agents that keep proposing denied actions are stopped for a human to look at. */
+  private void checkDenials(List<PolicyCheck> checks) {
+    if (checks.stream().noneMatch(c -> c.decision().denied())) {
+      return;
+    }
+    List<Event> log = services.events().events(runId);
+    long denials = 0;
+    for (int i = log.size() - 1; i >= 0; i--) {
+      Event e = log.get(i);
+      if (e.type() == RUN_RESUMED) {
+        break;
+      }
+      if (e.type() == POLICY_EVALUATED
+          && "DENY".equals(e.payloadString("effect").orElse(""))
+          && e.payload().containsKey("riskScore")) { // agent actions, not approval refusals
+        denials++;
+      }
+    }
+    if (denials >= MAX_DENIALS) {
+      requestSafeStop(
+          denials + " policy denials since the last resume", Actor.SYSTEM, false, Map.of());
+    }
+  }
+
+  /**
+   * Restores the checkpoint taken before {@code stageId} and marks it and everything downstream
+   * that had started ROLLED_BACK (running attempts are cancelled); the scheduler runs them again.
+   */
+  private void onRollback(Rollback r) {
+    if (current.run().status().isTerminal() || !stages.containsKey(r.stageId())) {
+      LOG.log(System.Logger.Level.WARNING, "ignored rollback to {0}", r.stageId());
+      return;
+    }
+    Optional<CheckpointRef> checkpoint = latestCheckpoint(r.stageId());
+    if (checkpoint.isEmpty()) {
+      LOG.log(
+          System.Logger.Level.WARNING, "ignored rollback: no checkpoint before {0}", r.stageId());
+      return;
+    }
+    services.checkpoints().restore(checkpoint.get());
+    List<String> affected = new ArrayList<>();
+    affected.add(r.stageId());
+    affected.addAll(dag.downstreamClosure(r.stageId()));
+    for (String key : affected) {
+      if (StageStateMachine.canTransition(statusOf(key), StageEvent.ROLL_BACK)) {
+        inFlight.remove(key);
+        Future<?> task = running.remove(key);
+        if (task != null) {
+          task.cancel(true);
+        }
+        approvalRequests.remove(key);
+        retryTimers.remove(key);
+        stageEvent(
+            ROLLED_BACK,
+            key,
+            r.by(),
+            Map.of(
+                "reason", r.reason(),
+                "checkpointId", checkpoint.get().id(),
+                "rolledBackTo", r.stageId()));
+      }
+    }
+  }
+
+  /**
+   * If the stage keeps a checkpoint and its last attempt wrote files, restores the checkpoint
+   * (automatic rollback, so the next attempt or a human starts from a clean workspace).
+   *
+   * @return the restored checkpoint's id
+   */
+  private Optional<String> restoreIfWritten(String stageKey) {
+    StageDefinition def = stages.get(stageKey);
+    if (def.checkpoint() == CheckpointKind.NONE || !attemptWroteFiles(stageKey)) {
+      return Optional.empty();
+    }
+    Optional<CheckpointRef> checkpoint = latestCheckpoint(stageKey);
+    checkpoint.ifPresent(ref -> services.checkpoints().restore(ref));
+    return checkpoint.map(CheckpointRef::id);
+  }
+
+  /** Whether the stage's latest attempt was allowed (or asked approval) to write files. */
+  private boolean attemptWroteFiles(String stageKey) {
+    List<Event> events = stageEvents(stageKey);
+    for (int i = events.size() - 1; i >= 0; i--) {
+      Event e = events.get(i);
+      if (e.type() == STAGE_STARTED) {
+        return false;
+      }
+      String action = e.payloadString("action").orElse("");
+      if (e.type() == POLICY_EVALUATED
+          && (action.startsWith("file_write ") || action.startsWith("diff "))
+          && !"DENY".equals(e.payloadString("effect").orElse(""))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private Optional<CheckpointRef> latestCheckpoint(String stageId) {
+    return stageEvents(stageId).stream()
+        .filter(e -> e.type() == CHECKPOINT_CREATED)
+        .reduce((first, second) -> second)
+        .flatMap(e -> e.payloadString("checkpointId"))
+        .map(id -> new CheckpointRef(id, runId, stageId));
+  }
+
+  private static Map<String, Object> withRestored(
+      Map<String, Object> payload, Optional<String> restored) {
+    if (restored.isEmpty()) {
+      return payload;
+    }
+    Map<String, Object> copy = new LinkedHashMap<>(payload);
+    copy.put("restoredCheckpoint", restored.get());
+    return copy;
   }
 
   // ---- failure handling -----------------------------------------------------------------------
@@ -692,12 +1109,18 @@ public final class Coordinator implements AutoCloseable {
   private void failAttempt(String stageKey, String reason, FailureKind kind, Actor actor) {
     StageDefinition def = stages.get(stageKey);
     StageInstance stage = current.stages().get(stageKey);
+    Optional<String> restored = restoreIfWritten(stageKey); // the next attempt starts clean
+    if (stopping != null) {
+      // nothing new starts during a safe stop: the stage is halted with the run, re-runs on resume
+      stopping.notes().add(stageKey + ": " + reason);
+      return;
+    }
     if (stage.status() == StageStatus.RUNNING) {
       if (kind == FailureKind.VALIDATION && def.onFailure().isPresent() && loopBack(def, reason)) {
         return;
       }
       if (kind.retryable() && stage.attempt() < def.retry().maxAttempts()) {
-        scheduleRetry(def, stage, reason, kind);
+        scheduleRetry(def, stage, reason, kind, restored);
         return;
       }
       if (kind.retryable() && def.fallback().isPresent() && !fallbackUsedThisLoop(stageKey)) {
@@ -706,40 +1129,43 @@ public final class Coordinator implements AutoCloseable {
             FALLBACK_USED,
             stageKey,
             Actor.SYSTEM,
-            Map.of("strategy", strategy, "reason", reason, "kind", kind)); // → RETRYING
+            withRestored(
+                Map.of("strategy", strategy, "reason", reason, "kind", kind),
+                restored)); // → RETRYING
         dispatch(stageKey, def, Optional.of(strategy));
         return;
       }
     }
     if (def.highImpact()) {
-      runEvent(
-          RUN_HALTED,
+      requestSafeStop(
+          "high-impact stage " + stageKey + " failed: " + reason,
           Actor.SYSTEM,
-          Map.of(
-              "reason",
-              "high-impact stage " + stageKey + " failed: " + reason,
-              "stageId",
-              stageKey,
-              "kind",
-              kind));
+          false,
+          Map.of("stageId", stageKey, "kind", kind));
       return;
     }
-    stageEvent(STAGE_FAILED, stageKey, actor, Map.of("reason", reason, "kind", kind));
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("reason", reason);
+    payload.put("kind", kind);
+    restored.ifPresent(id -> payload.put("restoredCheckpoint", id));
+    stageEvent(STAGE_FAILED, stageKey, actor, payload);
   }
 
   private void scheduleRetry(
-      StageDefinition def, StageInstance stage, String reason, FailureKind kind) {
+      StageDefinition def,
+      StageInstance stage,
+      String reason,
+      FailureKind kind,
+      Optional<String> restored) {
     Duration delay = def.retry().delayAfter(stage.attempt(), ThreadLocalRandom.current());
-    stageEvent(
-        STAGE_RETRIED,
-        def.id(),
-        Actor.SYSTEM,
-        Map.of(
-            "reason", reason,
-            "kind", kind,
-            "attempt", stage.attempt(),
-            "maxAttempts", def.retry().maxAttempts(),
-            "delay", delay)); // → RETRYING
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("reason", reason);
+    payload.put("kind", kind);
+    payload.put("attempt", stage.attempt());
+    payload.put("maxAttempts", def.retry().maxAttempts());
+    payload.put("delay", delay);
+    restored.ifPresent(id -> payload.put("restoredCheckpoint", id));
+    stageEvent(STAGE_RETRIED, def.id(), Actor.SYSTEM, payload); // → RETRYING
     long retry = current.lastSeq();
     retryTimers.put(def.id(), retry);
     later(delay, new RetryDue(def.id(), retry));
@@ -747,7 +1173,8 @@ public final class Coordinator implements AutoCloseable {
 
   /** Starts the retry if the stage is still waiting for the backoff the timer belongs to. */
   private void onRetryDue(RetryDue r) {
-    if (statusOf(r.stageKey()) == StageStatus.RETRYING
+    if (stopping == null
+        && statusOf(r.stageKey()) == StageStatus.RETRYING
         && Long.valueOf(r.retry()).equals(retryTimers.get(r.stageKey()))) {
       retryTimers.remove(r.stageKey());
       dispatch(r.stageKey(), stages.get(r.stageKey()));
@@ -888,12 +1315,11 @@ public final class Coordinator implements AutoCloseable {
     }
   }
 
-  /**
-   * Statuses for the ready-check: an invalidated stage is pending again (STAGE_READY resets it).
-   */
+  /** Statuses for the ready-check: invalidated and rolled-back stages are pending again. */
   private Map<String, StageStatus> schedulable() {
     Map<String, StageStatus> statuses = new LinkedHashMap<>(current.statuses());
-    statuses.replaceAll((k, s) -> s == StageStatus.INVALIDATED ? StageStatus.PENDING : s);
+    statuses.replaceAll((k, s) ->
+        s == StageStatus.INVALIDATED || s == StageStatus.ROLLED_BACK ? StageStatus.PENDING : s);
     return statuses;
   }
 
@@ -964,17 +1390,30 @@ public final class Coordinator implements AutoCloseable {
           cause instanceof TimeoutException
               ? "timed out after " + timeout
               : "agent threw " + cause.getClass().getSimpleName() + ": " + cause.getMessage();
-      return new StageFailed(stageId, dispatch, reason, FailureKind.of(cause), context.checks());
+      return new StageFailed(
+          stageId, dispatch, reason, FailureKind.of(cause), context.checks(), context.usage());
     }
     return switch (result) {
       case null ->
           new StageFailed(
-              stageId, dispatch, "agent returned no result", FailureKind.FATAL, context.checks());
+              stageId,
+              dispatch,
+              "agent returned no result",
+              FailureKind.FATAL,
+              context.checks(),
+              context.usage());
       case AgentResult.Success s ->
           new StageCompleted(
-              stageId, dispatch, s, context.reads(), context.checks(), context.reportedRisk());
+              stageId,
+              dispatch,
+              s,
+              context.reads(),
+              context.checks(),
+              context.reportedRisk(),
+              context.usage());
       case AgentResult.Failure f ->
-          new StageFailed(stageId, dispatch, f.reason(), f.kind(), context.checks());
+          new StageFailed(
+              stageId, dispatch, f.reason(), f.kind(), context.checks(), context.usage());
     };
   }
 
