@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "impact_report",
+  "description": "What a change to an existing system touches, so design and tests account for it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["modules", "files", "apis", "dataFlows", "migrations", "riskNotes", "testsToUpdate"],
+  "properties": {
+    "modules": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["path", "changeType", "reason"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "changeType": { "enum": ["ADD", "MODIFY", "DELETE"] },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "apis": { "type": "array", "items": { "type": "string" } },
+    "dataFlows": { "type": "array", "items": { "type": "string" } },
+    "migrations": { "type": "array", "items": { "type": "string" } },
+    "riskNotes": { "type": "array", "items": { "type": "string" } },
+    "testsToUpdate": { "type": "array", "items": { "type": "string" } }
+  }
+}

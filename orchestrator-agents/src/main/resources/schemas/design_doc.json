@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "design_doc",
+  "description": "How the change will be built, the API contract and the risks. Approved by a human before implementation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["approach", "alternativesConsidered", "apiChanges", "schemaChanges", "components", "risks", "rolloutPlan"],
+  "properties": {
+    "approach": { "type": "string", "minLength": 1 },
+    "alternativesConsidered": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["option", "whyNot"],
+        "properties": { "option": { "type": "string" }, "whyNot": { "type": "string" } }
+      }
+    },
+    "apiChanges": {
+      "type": "string", "minLength": 1,
+      "description": "An OpenAPI 3 fragment (YAML) for new or changed endpoints, or a sentence saying the API does not change."
+    },
+    "schemaChanges": { "type": "string", "description": "Flyway SQL for database changes; empty when there are none." },
+    "components": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["name", "responsibility"],
+        "properties": { "name": { "type": "string" }, "responsibility": { "type": "string" } }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["risk", "likelihood", "impact", "mitigation"],
+        "properties": {
+          "risk": { "type": "string" },
+          "likelihood": { "enum": ["LOW", "MED", "HIGH"] },
+          "impact": { "enum": ["LOW", "MED", "HIGH"] },
+          "mitigation": { "type": "string" }
+        }
+      }
+    },
+    "rolloutPlan": { "type": "string", "minLength": 1 }
+  }
+}

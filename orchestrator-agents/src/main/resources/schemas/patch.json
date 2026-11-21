@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "patch",
+  "description": "Code changes as whole new file contents (no diff hunks to misapply). Applied through FileTool, so every path is policy-checked.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "files"],
+  "properties": {
+    "summary": { "type": "string", "minLength": 1 },
+    "files": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["path", "newContent"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "pattern": "^[^/\\\\].*$" },
+          "newContent": { "type": "string" }
+        }
+      }
+    },
+    "deletions": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

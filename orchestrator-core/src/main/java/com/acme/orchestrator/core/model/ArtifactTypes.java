@@ -16,5 +16,17 @@ public final class ArtifactTypes {
   public static final String VALIDATION_REPORT = "validation_report";
   public static final String RELEASE_REPORT = "release_report";
 
+  /** A human's answers to the spec's ambiguities ({@code {"answers": [{ambiguityId, answer}]}}). */
+  public static final String ANSWERS = "answers";
+
+  /** Code changes ({@code {"summary", "files": [{path, newContent}], "deletions": [path]}}). */
+  public static final String PATCH = "patch";
+
+  /** Tests written from the spec and design, same shape as {@link #PATCH}. */
+  public static final String TEST_PATCH = "test_patch";
+
+  /** Documentation changes, same shape as {@link #PATCH}. */
+  public static final String DOCS = "docs";
+
   private ArtifactTypes() {}
 }

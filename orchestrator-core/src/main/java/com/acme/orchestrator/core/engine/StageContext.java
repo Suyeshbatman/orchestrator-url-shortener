@@ -64,6 +64,30 @@ public final class StageContext {
     this.budget = budget;
   }
 
+  /**
+   * A context for running an agent outside a coordinator (agent tests, tooling). Nothing it does is
+   * recorded in a run's log; within a run the coordinator creates the context.
+   */
+  public static StageContext standalone(
+      Run run,
+      String stageKey,
+      int attempt,
+      List<String> feedback,
+      ArtifactStore artifacts,
+      ToolRegistry tools,
+      PolicyEngine policies) {
+    return new StageContext(
+        run,
+        stageKey,
+        attempt,
+        feedback,
+        artifacts,
+        tools,
+        policies,
+        Optional.empty(),
+        new BudgetGuard(run.budgets(), Usage.NONE));
+  }
+
   public Run run() {
     return run;
   }

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "release_report",
+  "description": "The go / no-go package for the human who approves the merge.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["checklist", "changelog", "riskRegister", "rollbackPlan", "openIssues", "finalEngineeringSummary"],
+  "properties": {
+    "checklist": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["item", "status"],
+        "properties": {
+          "item": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["DONE", "PENDING", "BLOCKED", "NOT_APPLICABLE"] },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "changelog": { "type": "string", "minLength": 1 },
+    "riskRegister": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["risk", "mitigation"],
+        "properties": { "risk": { "type": "string" }, "mitigation": { "type": "string" } }
+      }
+    },
+    "rollbackPlan": { "type": "string", "minLength": 1 },
+    "openIssues": { "type": "array", "items": { "type": "string" } },
+    "finalEngineeringSummary": { "type": "string", "minLength": 1, "description": "Markdown." }
+  }
+}

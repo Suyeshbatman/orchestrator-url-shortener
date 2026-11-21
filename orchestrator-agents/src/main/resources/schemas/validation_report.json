@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "validation_report",
+  "description": "What the deterministic ValidationAgent measured: build, tests, coverage, policy scan of the full diff. Read by the build.green, tests.green, coverage.min and policy.noDeny gates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["build", "tests", "coverage", "policy", "diff"],
+  "properties": {
+    "build": {
+      "type": "object", "additionalProperties": false, "required": ["status"],
+      "properties": {
+        "status": { "enum": ["SUCCESS", "FAILURE"] },
+        "command": { "type": "string" },
+        "summary": { "type": "string" }
+      }
+    },
+    "tests": {
+      "type": "object", "additionalProperties": false, "required": ["total", "failed", "errors", "skipped", "failures"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["test", "message"],
+            "properties": { "test": { "type": "string" }, "message": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object", "additionalProperties": false, "required": ["line"],
+      "properties": { "line": { "type": "number", "minimum": 0, "maximum": 1 } }
+    },
+    "policy": {
+      "type": "object", "additionalProperties": false, "required": ["decision", "matchedPolicies", "riskScore"],
+      "properties": {
+        "decision": { "enum": ["ALLOW", "REQUIRE_APPROVAL", "DENY"] },
+        "riskScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "matchedPolicies": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "decision", "reason"],
+            "properties": {
+              "id": { "type": "string" },
+              "decision": { "enum": ["ALLOW", "REQUIRE_APPROVAL", "DENY"] },
+              "reason": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "diff": {
+      "type": "object", "additionalProperties": false, "required": ["filesChanged", "linesChanged", "paths"],
+      "properties": {
+        "filesChanged": { "type": "integer", "minimum": 0 },
+        "linesChanged": { "type": "integer", "minimum": 0 },
+        "paths": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

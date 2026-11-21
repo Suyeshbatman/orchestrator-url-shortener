@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "task_graph",
+  "description": "The work, split into tasks small enough for one implementation attempt each. Dependencies must form a DAG.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tasks"],
+  "properties": {
+    "tasks": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "title", "type", "requirementIds", "dependsOn", "estimatedFiles", "risk"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^T[0-9]+$" },
+          "title": { "type": "string", "minLength": 1 },
+          "type": { "enum": ["CODE", "TEST", "DOC", "MIGRATION", "CONFIG"] },
+          "requirementIds": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^N?FR-[0-9]+$" } },
+          "dependsOn": { "type": "array", "items": { "type": "string", "pattern": "^T[0-9]+$" } },
+          "estimatedFiles": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "risk": { "enum": ["LOW", "MED", "HIGH"] }
+        }
+      }
+    }
+  }
+}
