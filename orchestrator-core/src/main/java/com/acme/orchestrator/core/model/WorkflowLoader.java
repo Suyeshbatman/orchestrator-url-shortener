@@ -15,6 +15,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -31,7 +32,8 @@ import tools.jackson.dataformat.yaml.YAMLMapper;
  *
  * <p>Checks: required fields; unique stage ids; exactly one of {@code agent}/{@code action}; {@code
  * dependsOn} names existing stages, without self-references, duplicates or cycles; {@code
- * onFailure.loopTo} is an upstream stage; gate syntax; durations; value ranges.
+ * onFailure.loopTo} is an upstream stage; gate syntax, and that each gate is known to the {@link
+ * GateCatalog}; durations; value ranges.
  */
 public final class WorkflowLoader {
 
@@ -69,6 +71,17 @@ public final class WorkflowLoader {
   private static final Set<String> ON_FAILURE_KEYS = Set.of("loopTo", "maxLoops", "feedback");
 
   private final YAMLMapper yaml = YAMLMapper.builder().build();
+  private final GateCatalog gateCatalog;
+
+  /** Checks gate syntax only. Runs should use {@link #WorkflowLoader(GateCatalog)}. */
+  public WorkflowLoader() {
+    this(GateCatalog.ANY);
+  }
+
+  /** Every gate must also be known to {@code gateCatalog}, with an acceptable argument. */
+  public WorkflowLoader(GateCatalog gateCatalog) {
+    this.gateCatalog = Objects.requireNonNull(gateCatalog, "gateCatalog");
+  }
 
   public WorkflowDefinition load(Path file) {
     try {
@@ -302,7 +315,14 @@ public final class WorkflowLoader {
     List<String> specs = strings(node, key, path, p);
     for (int i = 0; i < specs.size(); i++) {
       String spec = specs.get(i);
-      GateRef gate = p.attempt(path + "." + key + "[" + i + "]", () -> GateRef.parse(spec));
+      GateRef gate =
+          p.attempt(
+              path + "." + key + "[" + i + "]",
+              () -> {
+                GateRef parsed = GateRef.parse(spec);
+                gateCatalog.check(parsed);
+                return parsed;
+              });
       if (gate != null) {
         gates.add(gate);
       }

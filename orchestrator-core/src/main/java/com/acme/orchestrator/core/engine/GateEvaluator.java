@@ -3,8 +3,8 @@ package com.acme.orchestrator.core.engine;
 import com.acme.orchestrator.core.model.GateRef;
 
 /**
- * Port: evaluates one named gate. The registry of real gates (input.nonEmpty, coverage.min, …)
- * arrives in Step 4.1; until then {@link #PASS_ALL}. Throwing counts as a failed gate.
+ * Port: evaluates one named gate. The real implementation is {@code gate.GateRegistry}; {@link
+ * #PASS_ALL} is for tests of the engine itself. Throwing counts as a failed gate.
  */
 @FunctionalInterface
 public interface GateEvaluator {

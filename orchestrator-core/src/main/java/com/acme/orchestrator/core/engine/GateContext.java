@@ -28,4 +28,14 @@ public record GateContext(
   public GateContext {
     produced = List.copyOf(produced);
   }
+
+  /** The artifact of {@code type} this attempt produced, else the run's latest one. */
+  public Optional<Artifact> artifact(String type) {
+    for (int i = produced.size() - 1; i >= 0; i--) {
+      if (produced.get(i).type().equals(type)) {
+        return Optional.of(produced.get(i));
+      }
+    }
+    return latestOfType.apply(type);
+  }
 }

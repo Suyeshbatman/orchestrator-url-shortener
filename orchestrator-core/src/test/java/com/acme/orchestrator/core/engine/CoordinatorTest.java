@@ -12,6 +12,8 @@ import com.acme.orchestrator.core.event.EventType;
 import com.acme.orchestrator.core.event.InMemoryEventStore;
 import com.acme.orchestrator.core.event.RunState;
 import com.acme.orchestrator.core.event.RunStateProjector;
+import com.acme.orchestrator.core.gate.GateRegistry;
+import com.acme.orchestrator.core.gate.SchemaValidator;
 import com.acme.orchestrator.core.model.Artifact;
 import com.acme.orchestrator.core.model.AutonomyLevel;
 import com.acme.orchestrator.core.model.Run;
@@ -616,6 +618,54 @@ class CoordinatorTest {
             .orElseThrow();
     assertThat(amended.actor()).isEqualTo(ALICE);
     assertThat(amended.payload()).containsEntry("amendment", "also support QR codes");
+  }
+
+  @Test
+  void theRealGatesFailAStageWithTheirReasons() throws Exception {
+    WorkflowDefinition wf =
+        workflow("  - id: v\n    agent: V\n    exitGates: [build.green, coverage.min:0.80]\n");
+    Agent validator =
+        ctx ->
+            AgentResult.success(
+                "validated",
+                ArtifactOutput.of(
+                    "validation_report",
+                    "{\"build\":{\"status\":\"SUCCESS\"},\"coverage\":{\"line\":0.5}}",
+                    "test"));
+    start(
+        wf,
+        RunMode.GREENFIELD,
+        Map.of("V", validator),
+        GateRegistry.standard(SchemaValidator.STRUCTURE_ONLY));
+
+    awaitStatus(RunStatus.FAILED);
+    assertThat(events.events("run-1").stream().filter(e -> e.type() == EventType.GATE_EVALUATED))
+        .extracting(e -> e.payload().get("passed"))
+        .containsExactly(true, false);
+    assertThat(events.events("run-1").stream().filter(e -> e.type() == EventType.STAGE_FAILED))
+        .singleElement()
+        .satisfies(e ->
+            assertThat(e.payload())
+                .containsEntry(
+                    "reason",
+                    "exit gate coverage.min:0.80 failed: line coverage 0.5 is below 0.8"));
+  }
+
+  @Test
+  void startRejectsGatesTheRegistryDoesNotKnow() {
+    WorkflowDefinition wf = workflow("  - id: a\n    agent: A\n    exitGates: [build.gren]\n");
+    Coordinator.Services services =
+        new Coordinator.Services(
+            events,
+            artifacts,
+            AgentRegistry.of(Map.of("A", producer("x"))),
+            GateRegistry.standard(SchemaValidator.STRUCTURE_ONLY),
+            ToolRegistry.EMPTY);
+
+    assertThatThrownBy(() -> Coordinator.start(wf, run(wf, RunMode.GREENFIELD), services))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageStartingWith("stage a gate build.gren: unknown gate 'build.gren'");
+    assertThat(events.runIds()).isEmpty();
   }
 
   @Test

@@ -39,6 +39,7 @@ import com.acme.orchestrator.core.event.RunStateProjector;
 import com.acme.orchestrator.core.model.Artifact;
 import com.acme.orchestrator.core.model.Condition;
 import com.acme.orchestrator.core.model.Executor;
+import com.acme.orchestrator.core.model.GateCatalog;
 import com.acme.orchestrator.core.model.GateRef;
 import com.acme.orchestrator.core.model.ProducedBy;
 import com.acme.orchestrator.core.model.Run;
@@ -64,6 +65,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 /**
  * Runs one workflow run. A single dedicated thread consumes {@link Command}s and owns every state
@@ -148,7 +150,8 @@ public final class Coordinator implements AutoCloseable {
   /**
    * Starts (or continues) {@code run}: appends RUN_CREATED if its log is empty, then schedules.
    *
-   * @throws IllegalArgumentException if the run isn't of this workflow or an executor has no agent
+   * @throws IllegalArgumentException if the run isn't of this workflow, an executor has no agent,
+   *     or (when the gate evaluator is a {@link GateCatalog}) a gate is unknown
    */
   public static Coordinator start(WorkflowDefinition workflow, Run run, Services services) {
     if (!run.workflowId().equals(workflow.id())) {
@@ -158,6 +161,19 @@ public final class Coordinator implements AutoCloseable {
     List<String> missing = services.agents().missing(workflow);
     if (!missing.isEmpty()) {
       throw new IllegalArgumentException("no agent registered for: " + String.join(", ", missing));
+    }
+    if (services.gates() instanceof GateCatalog catalog) {
+      for (StageDefinition stage : workflow.stages()) {
+        for (GateRef gate :
+            Stream.concat(stage.entryGates().stream(), stage.exitGates().stream()).toList()) {
+          try {
+            catalog.check(gate);
+          } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                "stage " + stage.id() + " gate " + gate + ": " + e.getMessage(), e);
+          }
+        }
+      }
     }
     Coordinator c = new Coordinator(workflow, run, services);
     c.begin(run);
