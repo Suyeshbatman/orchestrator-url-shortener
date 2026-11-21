@@ -76,6 +76,20 @@ public final class StageContext {
       ArtifactStore artifacts,
       ToolRegistry tools,
       PolicyEngine policies) {
+    return standalone(
+        run, stageKey, attempt, feedback, artifacts, tools, policies, Optional.empty());
+  }
+
+  /** As {@link #standalone}, for a fallback attempt with {@code fallbackStrategy}. */
+  public static StageContext standalone(
+      Run run,
+      String stageKey,
+      int attempt,
+      List<String> feedback,
+      ArtifactStore artifacts,
+      ToolRegistry tools,
+      PolicyEngine policies,
+      Optional<String> fallbackStrategy) {
     return new StageContext(
         run,
         stageKey,
@@ -84,7 +98,7 @@ public final class StageContext {
         artifacts,
         tools,
         policies,
-        Optional.empty(),
+        fallbackStrategy,
         new BudgetGuard(run.budgets(), Usage.NONE));
   }
 

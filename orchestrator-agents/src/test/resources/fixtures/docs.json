@@ -1,0 +1,1 @@
+{"summary":"API note for the QR endpoint","files":[{"path":"docs/api/qr-codes.md","newContent":"# QR codes\n\n`GET /api/v1/links/{code}/qr?size=256` returns a PNG.\n"}]}

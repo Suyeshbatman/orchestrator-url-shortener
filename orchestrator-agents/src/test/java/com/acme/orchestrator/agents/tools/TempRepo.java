@@ -6,9 +6,9 @@ import java.util.Map;
 import org.eclipse.jgit.api.Git;
 
 /** A throwaway source repository with one commit on {@code main}. */
-final class TempRepo {
+public final class TempRepo {
 
-  static final Map<String, String> FILES =
+  public static final Map<String, String> FILES =
       Map.of(
           "README.md", "# demo\n",
           "shortener-service/src/main/java/com/acme/shortener/Link.java",
@@ -19,7 +19,7 @@ final class TempRepo {
 
   private TempRepo() {}
 
-  static Path create(Path dir) throws Exception {
+  public static Path create(Path dir) throws Exception {
     Path repo = dir.resolve("source");
     try (Git git = Git.init().setInitialBranch("main").setDirectory(repo.toFile()).call()) {
       for (Map.Entry<String, String> f : FILES.entrySet()) {

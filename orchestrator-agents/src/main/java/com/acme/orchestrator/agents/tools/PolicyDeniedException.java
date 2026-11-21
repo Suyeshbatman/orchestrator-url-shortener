@@ -1,7 +1,6 @@
 package com.acme.orchestrator.agents.tools;
 
 import com.acme.orchestrator.core.policy.Decision;
-import com.acme.orchestrator.core.policy.PolicyMatch;
 import java.util.stream.Collectors;
 
 /**
@@ -19,7 +18,7 @@ public final class PolicyDeniedException extends IllegalStateException {
             + decision.effect()
             + "): "
             + decision.matchedPolicies().stream()
-                .map(PolicyMatch::reason)
+                .map(m -> m.policyId() + ": " + m.reason())
                 .collect(Collectors.joining("; ")));
     this.decision = decision;
   }

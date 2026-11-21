@@ -70,14 +70,17 @@ final class AgentHarness {
   }
 
   StageContext context(String stage, List<String> feedback, ToolRegistry tools) {
+    return context(stage, feedback, tools, PolicyEngine.withoutPolicies(), Optional.empty());
+  }
+
+  StageContext context(
+      String stage,
+      List<String> feedback,
+      ToolRegistry tools,
+      PolicyEngine policies,
+      Optional<String> fallback) {
     return StageContext.standalone(
-        run,
-        stage,
-        feedback.size() + 1,
-        feedback,
-        artifacts,
-        tools,
-        PolicyEngine.withoutPolicies());
+        run, stage, feedback.size() + 1, feedback, artifacts, tools, policies, fallback);
   }
 
   StageContext context(String stage) {

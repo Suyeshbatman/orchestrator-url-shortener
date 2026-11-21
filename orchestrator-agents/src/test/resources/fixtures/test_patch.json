@@ -1,0 +1,1 @@
+{"summary":"QR endpoint API tests","files":[{"path":"shortener-service/src/test/java/com/acme/shortener/qr/QrApiIT.java","newContent":"package com.acme.shortener.qr;\n\nclass QrApiIT {}\n","covers":["AC-1","AC-2","AC-3"]}]}
