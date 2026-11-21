@@ -16,7 +16,7 @@ public enum StageEvent {
   SUCCEED,
   /** The attempt failed and attempts remain. */
   SCHEDULE_RETRY,
-  /** Failed for good: attempts and fallback exhausted, or a retry could not run. */
+  /** Failed for good: an entry gate, or attempts and fallback exhausted. */
   FAIL,
   /** A re-plan or loop-back discards this stage's output. */
   INVALIDATE,

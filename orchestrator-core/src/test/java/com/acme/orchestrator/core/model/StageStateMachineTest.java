@@ -37,8 +37,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * Every (status, event) pair: the 27 legal ones must land where this independent copy of the table
- * says, and the other 116 must throw.
+ * Every (status, event) pair: the 28 legal ones must land where this independent copy of the table
+ * says, and the other 115 must throw.
  */
 class StageStateMachineTest {
 
@@ -46,7 +46,18 @@ class StageStateMachineTest {
       Map.ofEntries(
           Map.entry(PENDING, Map.of(DEPENDENCIES_MET, READY, SKIP, SKIPPED, HALT, HALTED)),
           Map.entry(
-              READY, Map.of(START, RUNNING, SKIP, SKIPPED, INVALIDATE, INVALIDATED, HALT, HALTED)),
+              READY,
+              Map.of(
+                  START,
+                  RUNNING,
+                  SKIP,
+                  SKIPPED,
+                  FAIL,
+                  FAILED,
+                  INVALIDATE,
+                  INVALIDATED,
+                  HALT,
+                  HALTED)),
           Map.entry(
               RUNNING,
               Map.of(
@@ -111,9 +122,9 @@ class StageStateMachineTest {
 
   @Test
   void tableCoversEveryStatusAndMatchesExactly() {
-    assertThat(legal().count()).isEqualTo(27);
+    assertThat(legal().count()).isEqualTo(28);
     assertThat(illegal().count())
-        .isEqualTo((long) StageStatus.values().length * StageEvent.values().length - 27);
+        .isEqualTo((long) StageStatus.values().length * StageEvent.values().length - 28);
     for (StageStatus s : StageStatus.values()) {
       assertThat(StageStateMachine.allowed(s)).isEqualTo(EXPECTED.get(s));
     }

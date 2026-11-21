@@ -206,9 +206,7 @@ public final class WorkflowLoader {
 
     List<String> dependsOn = strings(node, "dependsOn", path, p);
     Optional<String> condition = Optional.ofNullable(string(node, "condition", path, p, false));
-    if (condition.isPresent() && condition.get().isBlank()) {
-      p.add(path + ".condition", "must not be blank");
-    }
+    condition.ifPresent(c -> p.attempt(path + ".condition", () -> Condition.parse(c)));
     List<GateRef> entryGates = gates(node, "entryGates", path, p);
     List<GateRef> exitGates = gates(node, "exitGates", path, p);
     Approval approval = approval(node.get("approval"), path + ".approval", p);
