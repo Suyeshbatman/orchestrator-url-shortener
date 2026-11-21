@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -55,6 +56,7 @@ import tools.jackson.databind.json.JsonMapper;
 @Import({TestcontainersConfiguration.class, OrchestrationApiIT.FakeAgents.class})
 @SpringBootTest(properties = "orchestrator.recover-on-startup=false")
 @AutoConfigureMockMvc
+@AutoConfigureMetrics
 class OrchestrationApiIT {
 
   static final String OPERATOR = "operator-secret-key";
@@ -339,6 +341,24 @@ class OrchestrationApiIT {
                         "publish[\"publish<br/>SUCCEEDED\"]:::succeeded")))
         .andExpect(
             content().string(org.hamcrest.Matchers.containsString("design --> implementation")));
+
+    // reliability: the summary from the logs, the live counters for Prometheus
+    JsonNode summary = json(call(get("/api/metrics/summary"), OPERATOR).andExpect(status().isOk()));
+    assertThat(summary.path("runs").path("completed").asLong()).isPositive();
+    // scope, design, release, merge (the questions were answered, not decided)
+    assertThat(summary.path("approvalWait").path("decided").asLong()).isGreaterThanOrEqualTo(4);
+    assertThat(summary.path("endToEnd").path("p95Seconds").isNumber()).isTrue();
+    assertThat(summary.path("endToEndExcludingApprovalWait").path("p50Seconds").asDouble())
+        .isLessThanOrEqualTo(summary.path("endToEnd").path("p50Seconds").asDouble());
+    call(get("/api/metrics/summary"), null).andExpect(status().isUnauthorized());
+    String prometheus =
+        mvc.perform(get("/actuator/prometheus")).andReturn().getResponse().getContentAsString();
+    assertThat(prometheus)
+        .contains("orchestrator_stage_executions_total{")
+        .contains("outcome=\"succeeded\"")
+        .contains("orchestrator_replans_total{")
+        .contains("orchestrator_approvals_wait_seconds_count{")
+        .contains("orchestrator_run_duration_seconds_count{");
 
     // a decided approval and a finished run take no more commands
     call(

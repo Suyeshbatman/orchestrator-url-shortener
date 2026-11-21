@@ -2,6 +2,7 @@ package com.acme.orchestrator.app.config;
 
 import com.acme.orchestrator.agents.llm.JsonSchemas;
 import com.acme.orchestrator.agents.tools.WorkspaceManager;
+import com.acme.orchestrator.app.metrics.MetricsRecorder;
 import com.acme.orchestrator.app.persistence.ApprovalRepository;
 import com.acme.orchestrator.app.persistence.JdbcArtifactStore;
 import com.acme.orchestrator.app.persistence.JdbcEventStore;
@@ -17,7 +18,9 @@ import com.acme.orchestrator.core.artifact.ArtifactStore;
 import com.acme.orchestrator.core.event.EventStore;
 import com.acme.orchestrator.core.gate.GateRegistry;
 import com.acme.orchestrator.core.policy.PolicyEngine;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
+import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -39,9 +42,18 @@ class OrchestratorConfiguration {
   }
 
   @Bean
+  MetricsRecorder metricsRecorder(MeterRegistry registry) {
+    return new MetricsRecorder(registry);
+  }
+
+  @Bean
   EventStore eventStore(
-      JdbcClient jdbc, TransactionTemplate tx, Clock clock, RunProjections projections) {
-    return new JdbcEventStore(jdbc, tx, clock, projections);
+      JdbcClient jdbc,
+      TransactionTemplate tx,
+      Clock clock,
+      RunProjections projections,
+      MetricsRecorder metrics) {
+    return new JdbcEventStore(jdbc, tx, clock, projections, List.of(metrics));
   }
 
   @Bean

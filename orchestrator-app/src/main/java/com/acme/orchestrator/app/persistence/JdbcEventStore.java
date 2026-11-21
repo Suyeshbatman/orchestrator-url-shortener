@@ -12,6 +12,9 @@ import java.time.Clock;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -23,6 +26,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 public final class JdbcEventStore implements EventStore {
 
+  private static final Logger LOG = LoggerFactory.getLogger(JdbcEventStore.class);
+
   private static final String COLUMNS =
       "seq, run_id, type, stage_id, actor, payload_text, ts, prev_hash, hash";
 
@@ -30,17 +35,39 @@ public final class JdbcEventStore implements EventStore {
   private final TransactionTemplate tx;
   private final Clock clock;
   private final RunProjections projections;
+  private final List<Consumer<Event>> listeners;
 
+  /**
+   * @param listeners told about every event once it is committed (e.g. metrics); a failing listener
+   *     is logged and never affects the append
+   */
   public JdbcEventStore(
-      JdbcClient jdbc, TransactionTemplate tx, Clock clock, RunProjections projections) {
+      JdbcClient jdbc,
+      TransactionTemplate tx,
+      Clock clock,
+      RunProjections projections,
+      List<Consumer<Event>> listeners) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.tx = Objects.requireNonNull(tx, "tx");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.projections = Objects.requireNonNull(projections, "projections");
+    this.listeners = List.copyOf(listeners);
   }
 
   @Override
   public Event append(EventDraft draft) {
+    Event event = appendInTransaction(draft);
+    for (Consumer<Event> listener : listeners) {
+      try {
+        listener.accept(event);
+      } catch (RuntimeException e) {
+        LOG.warn("event listener failed on {} #{}", event.runId(), event.seq(), e);
+      }
+    }
+    return event;
+  }
+
+  private Event appendInTransaction(EventDraft draft) {
     return tx.execute(status -> {
       jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:run, 1))")
           .param("run", draft.runId())
