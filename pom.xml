@@ -39,6 +39,7 @@
     <resilience4j.version>2.4.0</resilience4j.version>
     <anthropic-java.version>3.6.0</anthropic-java.version>
     <json-schema-validator.version>3.0.9</json-schema-validator.version>
+    <jgit.version>7.8.1.202611041320-r</jgit.version>
   </properties>
 
   <dependencyManagement>
@@ -77,6 +78,11 @@
         <groupId>com.networknt</groupId>
         <artifactId>json-schema-validator</artifactId>
         <version>${json-schema-validator.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.eclipse.jgit</groupId>
+        <artifactId>org.eclipse.jgit</artifactId>
+        <version>${jgit.version}</version>
       </dependency>
       <dependency>
         <groupId>net.jqwik</groupId>
