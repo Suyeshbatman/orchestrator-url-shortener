@@ -1,0 +1,39 @@
+policies:
+  - id: SEC-001-no-secrets
+    on: diff
+    deny_patterns: ["AKIA[0-9A-Z]{16}", "-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----", "(?i)(password|secret|api[_-]?key)\\s*[:=]\\s*['\"][^'\"]{8,}"]
+    effect: DENY
+  - id: SEC-002-path-jail
+    on: file_write
+    allow_paths: ["shortener-service/src/**", "docs/**", "scenarios/**"]
+    effect_outside: DENY
+  - id: SEC-003-forbidden-paths
+    on: file_write
+    paths: [".github/**", "config/policies.yml", "config/autonomy.yml", "orchestrator-*/**"]   # agents can't change their own guardrails
+    effect: DENY
+  - id: CHG-001-schema-migration
+    on: file_write
+    paths: ["**/db/migration/**"]
+    effect: REQUIRE_APPROVAL
+  - id: CHG-002-dependency-change
+    on: file_write
+    paths: ["**/pom.xml"]
+    effect: REQUIRE_APPROVAL
+  - id: CHG-003-blast-radius
+    on: diff
+    max_files_changed: 25
+    max_lines_changed: 1200
+    effect: REQUIRE_APPROVAL
+  - id: CHG-004-security-config
+    on: file_write
+    paths: ["**/config/Security*.java", "**/application*.yml", "**/application*.yaml"]
+    effect: REQUIRE_APPROVAL
+  - id: CMP-001-pii
+    on: diff
+    deny_patterns: ["(?i)log\\.(info|debug|warn)\\(.*(remoteAddr|getRemoteAddr|X-Forwarded-For)"]
+    effect: DENY
+    message: "Raw client IPs must not be logged (privacy)."
+  - id: CMD-001-command-allowlist
+    on: command
+    allow: ["mvn -q -pl shortener-service -am verify", "mvn -q -pl shortener-service test"]
+    effect_outside: DENY

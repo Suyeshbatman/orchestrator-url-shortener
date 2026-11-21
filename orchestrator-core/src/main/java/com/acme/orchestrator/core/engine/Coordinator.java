@@ -17,6 +17,8 @@ import static com.acme.orchestrator.core.event.EventType.STAGE_READY;
 import static com.acme.orchestrator.core.event.EventType.STAGE_SKIPPED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_STARTED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_SUCCEEDED;
+import static com.acme.orchestrator.core.event.RunStateProjector.AUTONOMY_HASH;
+import static com.acme.orchestrator.core.event.RunStateProjector.POLICIES_HASH;
 
 import com.acme.orchestrator.core.artifact.ArtifactDraft;
 import com.acme.orchestrator.core.artifact.ArtifactStore;
@@ -48,6 +50,9 @@ import com.acme.orchestrator.core.model.StageDefinition;
 import com.acme.orchestrator.core.model.StageInstance;
 import com.acme.orchestrator.core.model.StageStatus;
 import com.acme.orchestrator.core.model.WorkflowDefinition;
+import com.acme.orchestrator.core.policy.Invariant;
+import com.acme.orchestrator.core.policy.PolicyEngine;
+import com.acme.orchestrator.core.policy.PolicySet;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -56,6 +61,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -90,13 +96,18 @@ public final class Coordinator implements AutoCloseable {
 
   private static final System.Logger LOG = System.getLogger(Coordinator.class.getName());
 
-  /** What the coordinator works with. */
+  /**
+   * What the coordinator works with.
+   *
+   * @param policies loaded once at run start; their hashes are recorded in RUN_CREATED
+   */
   public record Services(
       EventStore events,
       ArtifactStore artifacts,
       AgentRegistry agents,
       GateEvaluator gates,
-      ToolRegistry tools) {
+      ToolRegistry tools,
+      PolicyEngine policies) {
 
     public Services {
       Objects.requireNonNull(events, "events");
@@ -104,6 +115,17 @@ public final class Coordinator implements AutoCloseable {
       Objects.requireNonNull(agents, "agents");
       Objects.requireNonNull(gates, "gates");
       Objects.requireNonNull(tools, "tools");
+      Objects.requireNonNull(policies, "policies");
+    }
+
+    /** Without config policies (the invariants still apply). */
+    public Services(
+        EventStore events,
+        ArtifactStore artifacts,
+        AgentRegistry agents,
+        GateEvaluator gates,
+        ToolRegistry tools) {
+      this(events, artifacts, agents, gates, tools, PolicyEngine.withoutPolicies());
     }
 
     public static Services of(EventStore events, ArtifactStore artifacts, AgentRegistry agents) {
@@ -181,10 +203,24 @@ public final class Coordinator implements AutoCloseable {
   }
 
   private void begin(Run run) {
+    PolicySet policies = services.policies().policies();
     if (services.events().head(runId).isEmpty()) {
       Map<String, Object> payload = new LinkedHashMap<>(RunStateProjector.runCreatedPayload(run));
       payload.put("workflowVersion", workflow.version());
+      payload.put(POLICIES_HASH, policies.policiesHash());
+      payload.put(AUTONOMY_HASH, policies.autonomyHash());
       services.events().append(EventDraft.run(runId, RUN_CREATED, Actor.SYSTEM, payload));
+    } else {
+      // change control: a run continues only under the rules it started with
+      Map<String, Object> created = services.events().events(runId).getFirst().payload();
+      if (!policies.policiesHash().equals(created.get(POLICIES_HASH))
+          || !policies.autonomyHash().equals(created.get(AUTONOMY_HASH))) {
+        throw new IllegalStateException(
+            "run "
+                + runId
+                + " started under different policies (policies.yml/autonomy.yml changed);"
+                + " it can't continue under the new ones");
+      }
     }
     refresh();
     publish();
@@ -431,13 +467,18 @@ public final class Coordinator implements AutoCloseable {
     Optional<String> exitFailure = evaluateGates(def, GateContext.Phase.EXIT, produced);
     if (exitFailure.isPresent()) {
       stageEvent(STAGE_FAILED, stageId, Actor.SYSTEM, Map.of("reason", exitFailure.get()));
-    } else if (def.approval().required()) {
+    } else if (services
+        .policies()
+        .stageApprovalRequired(def, current.run().autonomyLevel(), OptionalInt.empty())) {
       stageEvent(
           APPROVAL_REQUESTED,
           stageId,
           Actor.SYSTEM,
           Map.of(
-              "reason", def.approval().reason(),
+              "reason",
+                  def.approval().required()
+                      ? def.approval().reason()
+                      : Invariant.PUBLISH_REQUIRES_APPROVAL.text(),
               "summary", c.result().summary(),
               "artifacts", produced.stream().map(Artifact::id).toList()));
     } else {

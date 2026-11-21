@@ -22,6 +22,7 @@ import com.acme.orchestrator.core.model.RunStatus;
 import com.acme.orchestrator.core.model.StageStatus;
 import com.acme.orchestrator.core.model.WorkflowDefinition;
 import com.acme.orchestrator.core.model.WorkflowLoader;
+import com.acme.orchestrator.core.policy.PolicyEngine;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -649,6 +650,60 @@ class CoordinatorTest {
                 .containsEntry(
                     "reason",
                     "exit gate coverage.min:0.80 failed: line coverage 0.5 is below 0.8"));
+  }
+
+  @Test
+  void theRunIsTiedToThePoliciesItStartedUnder() throws Exception {
+    WorkflowDefinition wf = workflow("  - id: a\n    agent: A\n");
+    PolicyEngine policies = PolicyEngine.load(Path.of("..", "config"));
+    AgentRegistry agents = AgentRegistry.of(Map.of("A", producer("x")));
+    coordinator =
+        Coordinator.start(
+            wf,
+            run(wf, RunMode.GREENFIELD),
+            new Coordinator.Services(
+                events, artifacts, agents, GateEvaluator.PASS_ALL, ToolRegistry.EMPTY, policies));
+    awaitStatus(RunStatus.COMPLETED);
+    coordinator.close();
+
+    assertThat(events.events("run-1").getFirst().payload())
+        .containsEntry("policiesHash", policies.policies().policiesHash())
+        .containsEntry("autonomyHash", policies.policies().autonomyHash());
+
+    // continuing under the same files is fine; under edited ones it is refused
+    coordinator =
+        Coordinator.start(
+            wf,
+            run(wf, RunMode.GREENFIELD),
+            new Coordinator.Services(
+                events, artifacts, agents, GateEvaluator.PASS_ALL, ToolRegistry.EMPTY, policies));
+    coordinator.close();
+    coordinator = null;
+    assertThatThrownBy(() ->
+            Coordinator.start(
+                wf,
+                run(wf, RunMode.GREENFIELD),
+                new Coordinator.Services(
+                    events, artifacts, agents, GateEvaluator.PASS_ALL, ToolRegistry.EMPTY)))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("started under different policies");
+  }
+
+  @Test
+  void aPublishStageWaitsForAHumanEvenWithoutAConfiguredApproval() throws Exception {
+    WorkflowDefinition wf = workflow("  - id: publish\n    action: git.mergeToMain\n");
+    Agent merge = ctx -> AgentResult.success("merged");
+    start(wf, RunMode.GREENFIELD, Map.of("git.mergeToMain", merge));
+
+    coordinator.await(s -> s.statuses().get("publish") == StageStatus.WAITING_APPROVAL, WAIT);
+    assertThat(
+            events.events("run-1").stream().filter(e -> e.type() == EventType.APPROVAL_REQUESTED))
+        .singleElement()
+        .satisfies(e ->
+            assertThat(e.payload()).containsEntry("reason", "publish requires human approval"));
+
+    coordinator.submit(new Command.ApprovalDecision("publish", ALICE, Decision.APPROVE, "ship it"));
+    awaitStatus(RunStatus.COMPLETED);
   }
 
   @Test

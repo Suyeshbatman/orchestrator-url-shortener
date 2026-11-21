@@ -47,6 +47,11 @@ public final class RunStateProjector {
   public static final String MAX_LLM_CALLS = "maxLlmCalls";
   public static final String MAX_TOKENS = "maxTokens";
 
+  /** SHA-256 of the policies.yml / autonomy.yml the run started under (change control). */
+  public static final String POLICIES_HASH = "policiesHash";
+
+  public static final String AUTONOMY_HASH = "autonomyHash";
+
   /** Set on stage events of an expanded task. */
   public static final String TASK_ID = "taskId";
 

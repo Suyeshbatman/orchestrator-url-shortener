@@ -1,0 +1,8 @@
+levels:
+  L0_SUGGEST:    { description: "Agents produce artifacts only; every write needs approval" }
+  L1_SUPERVISED: { description: "Writes inside path jail auto-allowed; policy REQUIRE_APPROVAL + stage approvals enforced" }   # default
+  L2_TRUSTED:    { description: "Like L1 but design approval skipped for risk score < 30; publish ALWAYS needs approval" }
+invariants:      # cannot be relaxed by any level
+  - publish requires human approval
+  - DENY policies are never overridable
+  - approvals must come from a human principal with role APPROVER
