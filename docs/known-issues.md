@@ -23,8 +23,11 @@ from the cache. Redirects read the cache before the database, so any instance wi
 2. Delete it with `DELETE /api/v1/links/{code}` and get `204`.
 3. `GET /{code}` still returns `302`.
 
-The test `LinkServiceTest.knownIssueBf1_deleteDoesNotEvictCache` pins the current behaviour, so a
-fix must update that test.
+Two tests pin the current behaviour, so a fix must update both:
+- `LinkServiceTest.knownIssueBf1_deleteDoesNotEvictCache` (unit)
+- `LinkApiIT.knownIssueBf1_deletedLinkStillRedirectsFromCache` (over HTTP, expects `302`)
+
+The design context is in [ADR-0003](adr/0003-cache-strategy.md).
 
 **Expected fix (out of scope until the brownfield scenario).**
 - On delete, evict the code from L2 (Redis) and from the local L1.
