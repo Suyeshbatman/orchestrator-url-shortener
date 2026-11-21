@@ -14,7 +14,6 @@ import tools.jackson.databind.JsonNode;
 public final class ImpactAnalysisAgent extends LlmAgent {
 
   public static final String NAME = "ImpactAnalysisAgent";
-  static final String TARGET_MODULE = "shortener-service";
 
   public ImpactAnalysisAgent(AgentKit kit) {
     super(kit, NAME, ArtifactTypes.IMPACT_REPORT, 6_000);

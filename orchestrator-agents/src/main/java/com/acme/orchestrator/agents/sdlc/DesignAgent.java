@@ -21,6 +21,7 @@ public final class DesignAgent extends LlmAgent {
   protected Map<String, String> inputs(StageContext ctx) {
     return Map.of(
         "spec", content(ctx, ArtifactTypes.REQUIREMENTS_SPEC),
+        "codebase", codebase(ctx),
         "taskGraph", content(ctx, ArtifactTypes.TASK_GRAPH),
         "impact",
             ctx.artifact(ArtifactTypes.IMPACT_REPORT)

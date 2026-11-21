@@ -111,6 +111,14 @@ class AnthropicLlmGatewayTest {
   }
 
   @Test
+  void largeRepliesGetMoreTime() {
+    var settings = AnthropicLlmGateway.Settings.of("m", Optional.empty());
+
+    assertThat(settings.timeoutFor(0)).isEqualTo(Duration.ofSeconds(60));
+    assertThat(settings.timeoutFor(32_000)).isEqualTo(Duration.ofSeconds(60 + 800));
+  }
+
+  @Test
   void rateLimitsAndServerErrorsAreRetried() {
     script.add(new Reply(429, error("rate_limit_error", "slow down")));
     script.add(new Reply(529, error("overloaded_error", "overloaded")));

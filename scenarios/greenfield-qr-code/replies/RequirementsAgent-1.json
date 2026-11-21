@@ -1,0 +1,152 @@
+{
+  "problemStatement": "Printed material and screens need a scannable code for a short link. Add an endpoint that returns a QR code PNG encoding the link's short URL, with an optional pixel size between 128 and 1024, served only while the link is active.",
+  "functional": [
+    {
+      "id": "FR-1",
+      "text": "GET /{code}/qr returns a PNG image (Content-Type image/png) containing a QR code that encodes the link's short URL ({base-url}/{code}).",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-2",
+      "text": "An optional query parameter size sets the image width and height in pixels; it must be an integer from 128 to 1024 inclusive, and defaults to 256.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-3",
+      "text": "A size outside 128-1024 is rejected with 400 and a Problem Details body of type /problems/invalid-qr-size; a non-integer size is rejected with 400 and type /problems/validation-failed.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-4",
+      "text": "The QR code is served only for an ACTIVE link: an unknown or DELETED code returns 404 with type /problems/link-not-found, decided from the database so a deletion takes effect immediately.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-5",
+      "text": "The endpoint is public like the redirect (no API key) and is rate limited with the redirect limit.",
+      "priority": "SHOULD"
+    }
+  ],
+  "nonFunctional": [
+    {
+      "id": "NFR-1",
+      "text": "The same code and size always produce byte-identical PNGs, so responses are reproducible.",
+      "category": "RELIABILITY"
+    },
+    {
+      "id": "NFR-2",
+      "text": "Responses carry Cache-Control: max-age=0, private so a status change is seen on the next request.",
+      "category": "COMPATIBILITY"
+    },
+    {
+      "id": "NFR-3",
+      "text": "The QR code encodes only the short URL, never the original URL, so scans go through the redirect and stop working when the link is deleted.",
+      "category": "PRIVACY"
+    }
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "requirementId": "FR-1",
+      "given": "an active link with code qrdemo1",
+      "when": "GET /qrdemo1/qr",
+      "then": "200, Content-Type image/png, and the image decodes to http://sho.rt/qrdemo1"
+    },
+    {
+      "id": "AC-2",
+      "requirementId": "FR-2",
+      "given": "an active link",
+      "when": "GET /{code}/qr without size",
+      "then": "the PNG is 256x256 pixels"
+    },
+    {
+      "id": "AC-3",
+      "requirementId": "FR-2",
+      "given": "an active link",
+      "when": "GET /{code}/qr?size=128 and ?size=1024",
+      "then": "the PNGs are 128x128 and 1024x1024 pixels"
+    },
+    {
+      "id": "AC-4",
+      "requirementId": "FR-3",
+      "given": "an active link",
+      "when": "GET /{code}/qr?size=127 or ?size=1025",
+      "then": "400 application/problem+json with type /problems/invalid-qr-size"
+    },
+    {
+      "id": "AC-5",
+      "requirementId": "FR-3",
+      "given": "an active link",
+      "when": "GET /{code}/qr?size=big",
+      "then": "400 application/problem+json with type /problems/validation-failed"
+    },
+    {
+      "id": "AC-6",
+      "requirementId": "FR-4",
+      "given": "no link with code nolink1",
+      "when": "GET /nolink1/qr",
+      "then": "404 with type /problems/link-not-found"
+    },
+    {
+      "id": "AC-7",
+      "requirementId": "FR-4",
+      "given": "a link that was deleted after a QR code was served for it",
+      "when": "GET /{code}/qr",
+      "then": "404 with type /problems/link-not-found"
+    },
+    {
+      "id": "AC-8",
+      "requirementId": "FR-5",
+      "given": "no X-API-Key header",
+      "when": "GET /{code}/qr for an active link",
+      "then": "200 (no authentication required)"
+    },
+    {
+      "id": "AC-9",
+      "requirementId": "NFR-1",
+      "given": "an active link",
+      "when": "the same QR code is requested twice with the same size",
+      "then": "the two bodies are byte-identical"
+    },
+    {
+      "id": "AC-10",
+      "requirementId": "NFR-2",
+      "given": "an active link",
+      "when": "GET /{code}/qr",
+      "then": "Cache-Control contains max-age=0 and private"
+    }
+  ],
+  "assumptions": [
+    "The QR code encodes the short URL built like LinkResponse.shortUrl: shortener.base-url without a trailing slash, then /{code}.",
+    "Error correction level M and a 1-module quiet zone are adequate for printed and on-screen use.",
+    "The path /{code}/qr does not collide with existing routes: codes match [A-Za-z0-9_-]{4,32} and contain no slash."
+  ],
+  "ambiguities": [
+    {
+      "id": "AMB-1",
+      "question": "Should the QR endpoint require an API key like the management API?",
+      "options": [
+        "public like the redirect",
+        "owner API key required"
+      ],
+      "severity": "NONBLOCKING",
+      "proposedDefault": "public like the redirect: the QR code only carries the short URL, which is already public"
+    },
+    {
+      "id": "AMB-2",
+      "question": "Should the QR code encode the short URL or the original URL?",
+      "options": [
+        "short URL",
+        "original URL"
+      ],
+      "severity": "NONBLOCKING",
+      "proposedDefault": "short URL, so scans are counted and deletion takes effect"
+    }
+  ],
+  "outOfScope": [
+    "Other image formats (SVG, JPEG), colours or logos inside the code",
+    "Server-side caching of generated images",
+    "Fixing the stale redirect cache after delete (known issue BF-1)"
+  ],
+  "classification": "GREENFIELD"
+}

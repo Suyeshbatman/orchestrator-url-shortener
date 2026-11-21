@@ -3,6 +3,10 @@ package com.acme.orchestrator.agents.sdlc;
 import com.acme.orchestrator.agents.llm.LlmClient;
 import com.acme.orchestrator.agents.llm.PromptTemplates.Prompt;
 import com.acme.orchestrator.agents.llm.UsageMeter;
+import com.acme.orchestrator.agents.tools.Authorizer;
+import com.acme.orchestrator.agents.tools.CodeIndexTool;
+import com.acme.orchestrator.agents.tools.FileTool;
+import com.acme.orchestrator.agents.tools.Workspace;
 import com.acme.orchestrator.core.engine.Agent;
 import com.acme.orchestrator.core.engine.AgentResult;
 import com.acme.orchestrator.core.engine.ArtifactOutput;
@@ -67,6 +71,24 @@ abstract class LlmAgent implements Agent {
             Optional.of(out.response().model()),
             Optional.of(out.promptHash())));
   }
+
+  /**
+   * What the target module looks like now (its map and its build file), in every mode: without it a
+   * greenfield change invents its own packages and module layout.
+   */
+  protected static String codebase(StageContext ctx) {
+    return ctx.tools()
+        .find(Workspace.class)
+        .map(w ->
+            new CodeIndexTool(w.root(), TARGET_MODULE).index().toMarkdown()
+                + "\n\n"
+                + Patches.currentContent(
+                    new FileTool(w, Authorizer.of(ctx)), List.of(TARGET_MODULE + "/pom.xml")))
+        .orElse("Not available.");
+  }
+
+  /** The module every change is made in. */
+  static final String TARGET_MODULE = "shortener-service";
 
   /** The content of an upstream artifact, recorded as an input. */
   protected static String content(StageContext ctx, String type) {

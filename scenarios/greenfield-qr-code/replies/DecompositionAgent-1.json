@@ -1,0 +1,122 @@
+{
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Add the ZXing core library to the shortener module",
+      "type": "CONFIG",
+      "requirementIds": [
+        "FR-1"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "shortener-service/pom.xml"
+      ],
+      "risk": "MED"
+    },
+    {
+      "id": "T2",
+      "title": "QR encoder: text to a deterministic PNG of a given size",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-1",
+        "FR-2",
+        "NFR-1",
+        "NFR-3"
+      ],
+      "dependsOn": [
+        "T1"
+      ],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/qr/QrCodeEncoder.java"
+      ],
+      "risk": "LOW"
+    },
+    {
+      "id": "T3",
+      "title": "QR service: active-link check from the database and size validation",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-2",
+        "FR-3",
+        "FR-4"
+      ],
+      "dependsOn": [
+        "T2"
+      ],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/qr/QrCodeService.java",
+        "shortener-service/src/main/java/com/acme/shortener/qr/InvalidQrSizeException.java"
+      ],
+      "risk": "MED"
+    },
+    {
+      "id": "T4",
+      "title": "Public endpoint GET /{code}/qr with the redirect rate limit and cache headers",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-1",
+        "FR-5",
+        "NFR-2"
+      ],
+      "dependsOn": [
+        "T3"
+      ],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/qr/QrCodeController.java"
+      ],
+      "risk": "HIGH"
+    },
+    {
+      "id": "T5",
+      "title": "Problem Details type invalid-qr-size",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-3"
+      ],
+      "dependsOn": [
+        "T3"
+      ],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/api/ProblemTypes.java",
+        "shortener-service/src/main/java/com/acme/shortener/api/ProblemDetailsHandler.java"
+      ],
+      "risk": "LOW"
+    },
+    {
+      "id": "T6",
+      "title": "Tests for the QR endpoint and encoder",
+      "type": "TEST",
+      "requirementIds": [
+        "FR-1",
+        "FR-2",
+        "FR-3",
+        "FR-4",
+        "FR-5",
+        "NFR-1",
+        "NFR-2",
+        "NFR-3"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "shortener-service/src/test/java/com/acme/shortener/qr/QrCodeIT.java",
+        "shortener-service/src/test/java/com/acme/shortener/qr/QrCodeEncoderTest.java"
+      ],
+      "risk": "LOW"
+    },
+    {
+      "id": "T7",
+      "title": "API note and ADR",
+      "type": "DOC",
+      "requirementIds": [
+        "FR-1",
+        "FR-4"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "docs/api/qr-code.md",
+        "docs/adr/0006-qr-codes.md"
+      ],
+      "risk": "LOW"
+    }
+  ]
+}

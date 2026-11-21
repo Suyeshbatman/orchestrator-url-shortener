@@ -27,7 +27,8 @@ public final class TestAuthoringAgent extends LlmAgent {
   protected Map<String, String> inputs(StageContext ctx) {
     return Map.of(
         "spec", content(ctx, ArtifactTypes.REQUIREMENTS_SPEC),
-        "design", content(ctx, ArtifactTypes.DESIGN_DOC));
+        "design", content(ctx, ArtifactTypes.DESIGN_DOC),
+        "codebase", codebase(ctx));
   }
 
   @Override

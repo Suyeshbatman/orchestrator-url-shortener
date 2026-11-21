@@ -83,8 +83,11 @@ class DeliveryAgentsTest {
         .contains("### " + LINK) // the current content of the files the tasks name
         .contains("public record Link(String code) {}")
         .contains("None yet (first implementation).")
-        .contains("None (greenfield).");
+        .contains("None (greenfield).")
+        .contains("The existing code base") // even greenfield changes see the module's map
+        .contains("Link");
     assertThat(h.sent.getFirst().systemPrompt())
+        .contains("base package com.acme.shortener")
         .contains("Implement every task in the task graph.")
         .contains("Never write secrets");
   }

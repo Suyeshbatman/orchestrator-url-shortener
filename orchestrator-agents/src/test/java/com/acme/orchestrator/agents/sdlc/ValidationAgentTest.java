@@ -121,7 +121,7 @@ class ValidationAgentTest {
     JsonNode report = validate(BUILD);
 
     assertThat(report.path("build").path("status").asString()).isEqualTo("SUCCESS");
-    assertThat(report.path("build").path("summary").asString()).contains("BUILD SUCCESS");
+    assertThat(report.path("build").path("summary").asString()).isEqualTo("build succeeded");
     JsonNode tests = report.path("tests");
     assertThat(tests.path("total").asInt()).isEqualTo(5); // surefire + failsafe
     assertThat(tests.path("failed").asInt()).isEqualTo(1);

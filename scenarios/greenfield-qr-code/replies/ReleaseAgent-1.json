@@ -1,0 +1,55 @@
+{
+  "checklist": [
+    {
+      "item": "Tests green",
+      "status": "DONE",
+      "evidence": "validation_report: build SUCCESS, 278 tests, 0 failed, 0 errors"
+    },
+    {
+      "item": "Coverage at or above the gate (80 %)",
+      "status": "DONE",
+      "evidence": "validation_report: line coverage 0.948"
+    },
+    {
+      "item": "Policy scan clean",
+      "status": "DONE",
+      "evidence": "policy REQUIRE_APPROVAL only for CHG-002-dependency-change (shortener-service/pom.xml), approved by a human; no DENY"
+    },
+    {
+      "item": "Migrations reviewed",
+      "status": "NOT_APPLICABLE",
+      "evidence": "design_doc.schemaChanges is empty; no files under db/migration in the diff"
+    },
+    {
+      "item": "Docs updated",
+      "status": "DONE",
+      "evidence": "docs/api/qr-code.md and docs/adr/0005-qr-codes.md in the diff"
+    },
+    {
+      "item": "Rollback plan ready",
+      "status": "DONE",
+      "evidence": "rollbackPlan below: revert the merge commit; no data or schema changes"
+    },
+    {
+      "item": "Every MUST requirement covered",
+      "status": "DONE",
+      "evidence": "FR-1 to FR-4 are covered by QrCodeIT (AC-1 to AC-7) and QrCodeEncoderTest"
+    }
+  ],
+  "changelog": "New: GET /{code}/qr returns a QR code PNG (128-1024 px, default 256) for an active short link. Unknown or deleted links get 404; sizes out of range get 400 invalid-qr-size.",
+  "riskRegister": [
+    {
+      "risk": "A public endpoint that does CPU work per request",
+      "mitigation": "Size capped at 1024 px and the redirect rate limit applies per visitor."
+    },
+    {
+      "risk": "New third-party dependency (ZXing core 3.5.3)",
+      "mitigation": "Core module only, no transitive dependencies, pinned version, approved through CHG-002."
+    }
+  ],
+  "rollbackPlan": "Revert the merge commit on main and redeploy. The change adds no tables, columns or configuration, so nothing else needs undoing; printed QR codes keep working because they encode the short URL, which the redirect still serves.",
+  "openIssues": [
+    "BF-1 (redirect cache not evicted on delete) is unchanged: a deleted link can still redirect from cache until its TTL expires, although its QR endpoint returns 404 at once. Fixed in the brownfield scenario."
+  ],
+  "finalEngineeringSummary": "## QR codes for short links\n\n**What changed.** A new `qr` feature package in `shortener-service`:\n- `QrCodeController`: public `GET /{code}/qr?size=`, redirect rate limit, `Cache-Control: max-age=0, private`.\n- `QrCodeService`: serves only `ACTIVE` links, read from the database (not the redirect cache, see ADR-0005); size 128-1024, default 256.\n- `QrCodeEncoder`: ZXing core, error correction M, quiet zone 1, 1-bit PNG, deterministic.\n- New problem type `/problems/invalid-qr-size`; new dependency `com.google.zxing:core` 3.5.3.\n\n**Why.** The QR code encodes the short URL so scans are counted and stop working when the link is deleted; the database check makes deletion take effect immediately despite BF-1.\n\n**How it was verified.** `mvn -q -pl shortener-service -am verify`: build succeeded, 278 tests green, 94.8 % line coverage. `QrCodeIT` decodes the PNGs and covers AC-1 to AC-10, including deletion after a QR code was served."
+}

@@ -1,0 +1,47 @@
+{
+  "summary": "End-to-end tests of GET /{code}/qr over real Postgres and Redis (decoding the PNG with ZXing), plus unit tests of the encoder's size and determinism.",
+  "files": [
+    {
+      "path": "shortener-service/src/test/java/com/acme/shortener/qr/QrCodeIT.java",
+      "newContent": "package com.acme.shortener.qr;\n\nimport static org.assertj.core.api.Assertions.assertThat;\nimport static org.hamcrest.Matchers.containsString;\nimport static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;\n\nimport com.acme.shortener.TestcontainersConfiguration;\nimport com.acme.shortener.link.Link;\nimport com.acme.shortener.link.LinkRepository;\nimport java.time.Clock;\nimport java.util.UUID;\nimport org.junit.jupiter.api.Test;\nimport org.springframework.beans.factory.annotation.Autowired;\nimport org.springframework.boot.test.context.SpringBootTest;\nimport org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;\nimport org.springframework.context.annotation.Import;\nimport org.springframework.test.web.servlet.MockMvc;\nimport org.springframework.test.web.servlet.ResultActions;\n\n/**\n * GET /{code}/qr end to end over real Postgres and Redis. Covers AC-1 to AC-10 (FR-1 to FR-5, NFR-1\n * to NFR-3). Links are stored through the repository: the QR endpoint only reads them.\n */\n@SpringBootTest\n@AutoConfigureMockMvc\n@Import(TestcontainersConfiguration.class)\nclass QrCodeIT {\n\n  private static final String PROBLEM_JSON = \"application/problem+json\";\n\n  @Autowired MockMvc mvc;\n  @Autowired LinkRepository links;\n\n  @Test\n  void anActiveLinkGetsAPngThatEncodesItsShortUrl() throws Exception {\n    String code = activeLink();\n\n    byte[] png =\n        mvc.perform(get(\"/\" + code + \"/qr\")) // AC-8: no API key\n            .andExpect(status().isOk())\n            .andExpect(content().contentType(\"image/png\"))\n            .andExpect(header().string(\"Cache-Control\", containsString(\"max-age=0\")))\n            .andExpect(header().string(\"Cache-Control\", containsString(\"private\")))\n            .andReturn()\n            .getResponse()\n            .getContentAsByteArray();\n\n    // AC-1 and NFR-3: the short URL, never the original URL\n    assertThat(QrCodes.decode(png)).isEqualTo(\"http://sho.rt/\" + code);\n    assertThat(QrCodes.image(png).getWidth()).isEqualTo(256); // AC-2: the default size\n  }\n\n  @Test\n  void theSizeParameterSetsThePixelSizeWithinItsRange() throws Exception {\n    String code = activeLink();\n\n    for (int size : new int[] {128, 1024}) { // AC-3\n      byte[] png = png(code, size);\n      assertThat(QrCodes.image(png).getWidth()).isEqualTo(size);\n      assertThat(QrCodes.image(png).getHeight()).isEqualTo(size);\n      assertThat(QrCodes.decode(png)).isEqualTo(\"http://sho.rt/\" + code);\n    }\n    assertThat(png(code, 300)).isEqualTo(png(code, 300)); // AC-9: byte-identical\n  }\n\n  @Test\n  void aSizeOutsideTheRangeIsAProblem() throws Exception {\n    String code = activeLink();\n\n    for (String size : new String[] {\"127\", \"1025\", \"0\", \"-5\"}) { // AC-4\n      expectProblem(mvc.perform(get(\"/\" + code + \"/qr\").param(\"size\", size)), 400)\n          .andExpect(jsonPath(\"$.type\").value(\"/problems/invalid-qr-size\"))\n          .andExpect(jsonPath(\"$.detail\", containsString(\"between 128 and 1024\")));\n    }\n    expectProblem(mvc.perform(get(\"/\" + code + \"/qr\").param(\"size\", \"big\")), 400) // AC-5\n        .andExpect(jsonPath(\"$.type\").value(\"/problems/validation-failed\"));\n  }\n\n  @Test\n  void unknownAndDeletedLinksGetNoQrCode() throws Exception {\n    expectProblem(mvc.perform(get(\"/nolink\" + suffix() + \"/qr\")), 404) // AC-6\n        .andExpect(jsonPath(\"$.type\").value(\"/problems/link-not-found\"));\n\n    Link link = save(\"qrdel\" + suffix());\n    mvc.perform(get(\"/\" + link.code() + \"/qr\")).andExpect(status().isOk());\n    links.save(link.markDeleted(Clock.systemUTC()));\n\n    expectProblem(mvc.perform(get(\"/\" + link.code() + \"/qr\")), 404) // AC-7: at once\n        .andExpect(jsonPath(\"$.type\").value(\"/problems/link-not-found\"));\n  }\n\n  // ---- helpers ----\n\n  private String activeLink() {\n    return save(\"qr\" + suffix()).code();\n  }\n\n  private Link save(String code) {\n    return links.save(\n        Link.newAlias(\n            links.nextId(), code, \"https://example.com/\" + code, \"tester\", Clock.systemUTC()));\n  }\n\n  private byte[] png(String code, int size) throws Exception {\n    return mvc.perform(get(\"/\" + code + \"/qr\").param(\"size\", String.valueOf(size)))\n        .andExpect(status().isOk())\n        .andReturn()\n        .getResponse()\n        .getContentAsByteArray();\n  }\n\n  private static ResultActions expectProblem(ResultActions result, int status) throws Exception {\n    return result\n        .andExpect(status().is(status))\n        .andExpect(content().contentTypeCompatibleWith(PROBLEM_JSON));\n  }\n\n  private static String suffix() {\n    return UUID.randomUUID().toString().replace(\"-\", \"\").substring(0, 8);\n  }\n}\n",
+      "covers": [
+        "AC-1",
+        "AC-2",
+        "AC-3",
+        "AC-4",
+        "AC-5",
+        "AC-6",
+        "AC-7",
+        "AC-8",
+        "AC-9",
+        "AC-10",
+        "FR-1",
+        "FR-2",
+        "FR-3",
+        "FR-4",
+        "FR-5",
+        "NFR-1",
+        "NFR-2",
+        "NFR-3"
+      ]
+    },
+    {
+      "path": "shortener-service/src/test/java/com/acme/shortener/qr/QrCodeEncoderTest.java",
+      "newContent": "package com.acme.shortener.qr;\n\nimport static org.assertj.core.api.Assertions.assertThat;\n\nimport java.awt.image.BufferedImage;\nimport java.util.Arrays;\nimport org.junit.jupiter.params.ParameterizedTest;\nimport org.junit.jupiter.params.provider.ValueSource;\n\n/** Covers AC-1 (decodes to the text), AC-2/AC-3 (exact size) and AC-9 (deterministic). */\nclass QrCodeEncoderTest {\n\n  private final QrCodeEncoder encoder = new QrCodeEncoder();\n\n  @ParameterizedTest\n  @ValueSource(ints = {128, 256, 1024})\n  void theImageIsExactlyTheRequestedSizeAndDecodesToTheText(int size) throws Exception {\n    byte[] png = encoder.png(\"http://sho.rt/qrdemo1\", size);\n\n    assertThat(Arrays.copyOf(png, 8))\n        .containsExactly(0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A); // PNG signature\n    BufferedImage image = QrCodes.image(png);\n    assertThat(image.getWidth()).isEqualTo(size);\n    assertThat(image.getHeight()).isEqualTo(size);\n    assertThat(QrCodes.decode(png)).isEqualTo(\"http://sho.rt/qrdemo1\");\n  }\n\n  @ParameterizedTest\n  @ValueSource(ints = {128, 1024})\n  void theSameTextAndSizeGiveTheSameBytes(int size) {\n    assertThat(encoder.png(\"http://sho.rt/abcd123\", size))\n        .isEqualTo(encoder.png(\"http://sho.rt/abcd123\", size))\n        .isNotEqualTo(encoder.png(\"http://sho.rt/abcd124\", size));\n  }\n}\n",
+      "covers": [
+        "AC-1",
+        "AC-2",
+        "AC-3",
+        "AC-9",
+        "NFR-1"
+      ]
+    },
+    {
+      "path": "shortener-service/src/test/java/com/acme/shortener/qr/QrCodes.java",
+      "newContent": "package com.acme.shortener.qr;\n\nimport com.google.zxing.BinaryBitmap;\nimport com.google.zxing.RGBLuminanceSource;\nimport com.google.zxing.common.HybridBinarizer;\nimport com.google.zxing.qrcode.QRCodeReader;\nimport java.awt.image.BufferedImage;\nimport java.io.ByteArrayInputStream;\nimport javax.imageio.ImageIO;\n\n/** Test helpers: read a PNG and decode the QR code in it. */\nfinal class QrCodes {\n\n  private QrCodes() {}\n\n  static BufferedImage image(byte[] png) throws Exception {\n    BufferedImage image = ImageIO.read(new ByteArrayInputStream(png));\n    if (image == null) {\n      throw new AssertionError(\"not a readable PNG\");\n    }\n    return image;\n  }\n\n  static String decode(byte[] png) throws Exception {\n    BufferedImage image = image(png);\n    int width = image.getWidth();\n    int height = image.getHeight();\n    int[] pixels = image.getRGB(0, 0, width, height, null, 0, width);\n    BinaryBitmap bitmap =\n        new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(width, height, pixels)));\n    return new QRCodeReader().decode(bitmap).getText();\n  }\n}\n",
+      "covers": [
+        "AC-1"
+      ]
+    }
+  ]
+}

@@ -22,7 +22,7 @@ class WorkflowLoaderTest {
 
     assertThat(wf.id()).isEqualTo("sdlc-standard");
     assertThat(wf.version()).isEqualTo(1);
-    assertThat(wf.budgets()).isEqualTo(new Budgets(Duration.ofMinutes(30), 60, 400_000));
+    assertThat(wf.budgets()).isEqualTo(new Budgets(Duration.ofMinutes(60), 60, 1_000_000));
     assertThat(wf.stages())
         .extracting(StageDefinition::id)
         .containsExactly(

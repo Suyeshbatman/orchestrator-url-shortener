@@ -53,7 +53,8 @@ public final class ImplementationAgent extends LlmAgent {
             ctx.artifact(ArtifactTypes.VALIDATION_REPORT)
                 .map(a -> a.contentJson())
                 .orElse("None yet (first implementation)."),
-        "strategy", strategy(ctx));
+        "strategy", strategy(ctx),
+        "codebase", codebase(ctx));
   }
 
   @Override

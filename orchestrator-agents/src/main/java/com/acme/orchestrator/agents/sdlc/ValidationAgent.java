@@ -8,11 +8,13 @@ import com.acme.orchestrator.core.engine.Agent;
 import com.acme.orchestrator.core.engine.AgentResult;
 import com.acme.orchestrator.core.engine.ArtifactOutput;
 import com.acme.orchestrator.core.engine.StageContext;
+import com.acme.orchestrator.core.event.CanonicalJson;
 import com.acme.orchestrator.core.model.ArtifactTypes;
 import com.acme.orchestrator.core.policy.Decision;
 import com.acme.orchestrator.core.policy.Effect;
 import com.acme.orchestrator.core.policy.PolicyEngine;
 import com.acme.orchestrator.core.policy.PolicyMatch;
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
@@ -27,8 +29,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Deterministic, no LLM: builds and tests the workspace with the allowlisted Maven command, reads
@@ -68,7 +70,11 @@ public final class ValidationAgent implements Agent {
   }
 
   static final int SUMMARY_LINES = 40;
-  private static final JsonMapper JSON = JsonMapper.builder().build();
+
+  /** Maven's boilerplate after the real errors. */
+  private static final Pattern MAVEN_HINT =
+      Pattern.compile(
+          "\\[ERROR\\]\\s*(-> \\[Help.*|Re-run Maven.*|To see the full.*|For more.*|\\[Help.*)?");
 
   private final PolicyEngine policies;
   private final Settings settings;
@@ -100,7 +106,7 @@ public final class ValidationAgent implements Agent {
         Map.of(
             "status", build.succeeded() ? "SUCCESS" : "FAILURE",
             "command", settings.command(),
-            "summary", summary(build)));
+            "summary", summary(build, workspace.root())));
     report.put(
         "tests",
         Map.of(
@@ -142,7 +148,8 @@ public final class ValidationAgent implements Agent {
         line,
         ArtifactOutput.of(
             ArtifactTypes.VALIDATION_REPORT,
-            JSON.writeValueAsString(report),
+            CanonicalJson.write(
+                report), // stable key order: later prompts (and their replay hashes) include it
             "measured by running '" + settings.command() + "' in the run's workspace"));
   }
 
@@ -150,13 +157,29 @@ public final class ValidationAgent implements Agent {
     return Map.of("id", m.policyId(), "decision", m.effect().name(), "reason", m.reason());
   }
 
-  /** The end of the build log: where Maven says what went wrong. */
-  static String summary(CommandTool.Result build) {
+  /**
+   * What the build says went wrong: Maven's {@code [ERROR]} lines, with the workspace path removed
+   * (or the end of the log when there are none). Nothing on success. The report feeds later
+   * prompts, so it holds nothing that changes from run to run (timestamps, PIDs, paths), or
+   * recorded replies would never match again.
+   */
+  static String summary(CommandTool.Result build, Path workspace) {
     if (build.timedOut()) {
       return "timed out after " + build.duration().toSeconds() + " s";
     }
-    List<String> lines = build.output().strip().lines().toList();
-    List<String> tail = lines.subList(Math.max(0, lines.size() - SUMMARY_LINES), lines.size());
+    if (build.succeeded()) {
+      return "build succeeded";
+    }
+    String root = workspace.toString();
+    List<String> lines =
+        build.output().strip().lines().map(l -> l.replace(root + File.separator, "")).toList();
+    List<String> errors =
+        lines.stream()
+            .filter(l -> l.startsWith("[ERROR]"))
+            .filter(l -> !MAVEN_HINT.matcher(l).matches())
+            .toList();
+    List<String> shown = errors.isEmpty() ? lines : errors;
+    List<String> tail = shown.subList(Math.max(0, shown.size() - SUMMARY_LINES), shown.size());
     String text = String.join("\n", tail);
     return text.isBlank() ? "exit code " + build.exitCode() : text;
   }

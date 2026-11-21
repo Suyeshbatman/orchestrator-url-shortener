@@ -1,0 +1,62 @@
+{
+  "approach": "A new feature package com.acme.shortener.qr. QrCodeController serves GET /{code:[A-Za-z0-9_-]{4,32}}/qr, public and @RateLimited(REDIRECT) like RedirectController. QrCodeService loads the link with LinkRepository.findByCode and accepts it only if Link.isActive(); otherwise it throws the existing LinkNotFoundException (404, link-not-found). It reads the database rather than LinkService.resolve so a deletion takes effect at once, independent of the redirect cache (BF-1). It validates size (default 256, 128-1024, else InvalidQrSizeException: 400 invalid-qr-size) and calls QrCodeEncoder, which encodes {shortener.base-url}/{code} with ZXing core (error correction M, quiet zone 1) and writes a 1-bit PNG with ImageIO.",
+  "alternativesConsidered": [
+    {
+      "option": "Resolve through LinkService.resolve (cache first)",
+      "whyNot": "The redirect cache is not evicted on delete (BF-1), so a deleted link would keep getting QR codes for up to 24 h."
+    },
+    {
+      "option": "Encode the original URL",
+      "whyNot": "Scans would bypass the redirect: no click analytics, and deleting the link would not stop a printed code from working."
+    },
+    {
+      "option": "Write a QR encoder by hand",
+      "whyNot": "QR encoding (Reed-Solomon, masking, versions) is easy to get subtly wrong; ZXing core is the standard library, small, with no transitive dependencies."
+    }
+  ],
+  "apiChanges": "paths:\n  /{code}/qr:\n    get:\n      summary: QR code PNG for a short link\n      security: []\n      parameters:\n        - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9_-]{4,32}$' } }\n        - { name: size, in: query, required: false, schema: { type: integer, minimum: 128, maximum: 1024, default: 256 } }\n      responses:\n        '200': { description: QR code encoding the short URL, content: { image/png: { schema: { type: string, format: binary } } } }\n        '400': { description: size out of range (type /problems/invalid-qr-size) or not an integer (type /problems/validation-failed), content: { application/problem+json: {} } }\n        '404': { description: unknown or deleted link (type /problems/link-not-found), content: { application/problem+json: {} } }\n        '429': { description: rate limited (type /problems/rate-limited), content: { application/problem+json: {} } }\n",
+  "schemaChanges": "",
+  "components": [
+    {
+      "name": "com.acme.shortener.qr.QrCodeController",
+      "responsibility": "GET /{code}/qr with an optional Integer size; returns image/png with Cache-Control max-age=0, private. Public and rate limited like the redirect."
+    },
+    {
+      "name": "com.acme.shortener.qr.QrCodeService",
+      "responsibility": "Active-link check from LinkRepository (LinkNotFoundException otherwise), size default and validation, builds the short URL from ShortenerProperties.baseUrl()."
+    },
+    {
+      "name": "com.acme.shortener.qr.QrCodeEncoder",
+      "responsibility": "ZXing QR encoding of text into a size x size 1-bit PNG; deterministic for the same input."
+    },
+    {
+      "name": "com.acme.shortener.qr.InvalidQrSizeException",
+      "responsibility": "Raised for a size outside 128-1024; mapped by ProblemDetailsHandler to 400 /problems/invalid-qr-size (new ProblemTypes.INVALID_QR_SIZE)."
+    },
+    {
+      "name": "Configuration",
+      "responsibility": "No new configuration properties. The size limits are part of the API contract; the feature uses the existing shortener.base-url and shortener.rate-limit.redirect-* settings and starts with the defaults."
+    }
+  ],
+  "risks": [
+    {
+      "risk": "A public image endpoint is CPU work anyone can trigger",
+      "likelihood": "MED",
+      "impact": "MED",
+      "mitigation": "Size capped at 1024 px; the redirect rate limit applies per visitor."
+    },
+    {
+      "risk": "The new route shadows an existing path",
+      "likelihood": "LOW",
+      "impact": "MED",
+      "mitigation": "The code pattern excludes '/'; the existing API and redirect tests run unchanged."
+    },
+    {
+      "risk": "A new third-party dependency",
+      "likelihood": "LOW",
+      "impact": "LOW",
+      "mitigation": "ZXing core only (no javase helpers), pinned version, approved through CHG-002."
+    }
+  ],
+  "rolloutPlan": "Ships with the next release; no feature flag because the endpoint is additive and needs no configuration. Rollback: revert the merge commit (no data or schema changes)."
+}

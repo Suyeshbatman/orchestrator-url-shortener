@@ -1,6 +1,6 @@
 workflow: sdlc-standard
 version: 1
-budgets: { maxWallClock: 30m, maxLlmCalls: 60, maxTokens: 400000 }
+budgets: { maxWallClock: 60m, maxLlmCalls: 60, maxTokens: 1000000 }
 defaults: { retry: { maxAttempts: 2, backoff: exponential, baseDelay: 2s, maxDelay: 20s, jitter: true }, timeout: 5m }
 stages:
   - id: requirements
@@ -28,22 +28,27 @@ stages:
     expand: tasks                                   # dynamic fan-out per task in task_graph (respects task deps)
     checkpoint: git
     retry: { maxAttempts: 3 }
+    timeout: 15m                                    # a 32k-token patch takes minutes to write
     fallback: { strategy: minimal-patch }           # smaller-scope prompt, then template
   - id: test_authoring
     agent: TestAuthoringAgent
     dependsOn: [design]                             # parallel with implementation (spec-first tests)
+    timeout: 15m                                    # up to 24k tokens of tests
     checkpoint: git
   - id: docs_draft
     agent: DocsAgent
     dependsOn: [design]                             # parallel
+    timeout: 10m
   - id: validation
     agent: ValidationAgent                          # deterministic: build, tests, coverage, policy scan
     dependsOn: [implementation, test_authoring]     # JOIN
     exitGates: [build.green, tests.green, coverage.min:0.80, policy.noDeny]
+    retry: { maxAttempts: 1 }                       # the same build fails the same way: loop back at once
     onFailure: { loopTo: implementation, maxLoops: 2, feedback: validation_report }
   - id: docs_finalize
     agent: DocsAgent
     dependsOn: [validation, docs_draft]             # JOIN
+    timeout: 10m
   - id: release_readiness
     agent: ReleaseAgent
     dependsOn: [docs_finalize]

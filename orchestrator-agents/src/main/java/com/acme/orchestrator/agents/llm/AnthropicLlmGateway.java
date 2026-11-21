@@ -3,6 +3,7 @@ package com.acme.orchestrator.agents.llm;
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.anthropic.core.JsonValue;
+import com.anthropic.core.RequestOptions;
 import com.anthropic.errors.AnthropicException;
 import com.anthropic.errors.AnthropicIoException;
 import com.anthropic.errors.AnthropicRetryableException;
@@ -55,7 +56,18 @@ public final class AnthropicLlmGateway implements LlmGateway, AutoCloseable {
       }
     }
 
-    /** 60 s timeout, 3 attempts from 1 s backoff. */
+    /**
+     * The time allowed for one call: the base timeout plus the time the reply may take to write (a
+     * 32k-token patch takes minutes, so a fixed timeout would fail every large call).
+     */
+    public Duration timeoutFor(int maxTokens) {
+      return timeout.plus(Duration.ofMillis((long) maxTokens * 1000 / MIN_TOKENS_PER_SECOND));
+    }
+
+    /** The slowest output rate the timeout allows for. */
+    static final int MIN_TOKENS_PER_SECOND = 40;
+
+    /** 60 s base timeout, 3 attempts from 1 s backoff. */
     public static Settings of(String model, Optional<String> fallbackModel) {
       return new Settings(model, fallbackModel, Duration.ofSeconds(60), 3, Duration.ofSeconds(1));
     }
@@ -117,6 +129,8 @@ public final class AnthropicLlmGateway implements LlmGateway, AutoCloseable {
 
   private LlmResponse call(String model, LlmRequest request) {
     MessageCreateParams params = params(model, request);
+    RequestOptions options =
+        RequestOptions.builder().timeout(settings.timeoutFor(request.maxTokens())).build();
     Retry retry =
         Retry.of(
             "anthropic-" + model,
@@ -129,7 +143,8 @@ public final class AnthropicLlmGateway implements LlmGateway, AutoCloseable {
     Supplier<Message> send =
         Retry.decorateSupplier(
             retry,
-            CircuitBreaker.decorateSupplier(breaker, () -> client.messages().create(params)));
+            CircuitBreaker.decorateSupplier(
+                breaker, () -> client.messages().create(params, options)));
     long started = System.nanoTime();
     Message message;
     try {
