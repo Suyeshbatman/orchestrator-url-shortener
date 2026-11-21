@@ -33,6 +33,7 @@ public final class StageContext {
   private final ArtifactStore artifacts;
   private final ToolRegistry tools;
   private final PolicyEngine policies;
+  private final Optional<String> fallbackStrategy;
   private final Set<ArtifactRef> reads = new LinkedHashSet<>();
   private final List<PolicyCheck> checks = new ArrayList<>();
   private Integer reportedRisk;
@@ -44,7 +45,8 @@ public final class StageContext {
       List<String> feedback,
       ArtifactStore artifacts,
       ToolRegistry tools,
-      PolicyEngine policies) {
+      PolicyEngine policies,
+      Optional<String> fallbackStrategy) {
     this.run = run;
     this.stageKey = stageKey;
     this.attempt = attempt;
@@ -52,6 +54,7 @@ public final class StageContext {
     this.artifacts = artifacts;
     this.tools = tools;
     this.policies = policies;
+    this.fallbackStrategy = fallbackStrategy;
   }
 
   public Run run() {
@@ -70,6 +73,14 @@ public final class StageContext {
   /** Why earlier attempts failed or were rejected, oldest first. Empty on a first attempt. */
   public List<String> feedback() {
     return feedback;
+  }
+
+  /**
+   * Set on the fallback attempt, after retries are used up: the stage's {@code fallback.strategy}
+   * (e.g. {@code minimal-patch}), telling the agent to try a narrower approach.
+   */
+  public Optional<String> fallbackStrategy() {
+    return fallbackStrategy;
   }
 
   public ToolRegistry tools() {

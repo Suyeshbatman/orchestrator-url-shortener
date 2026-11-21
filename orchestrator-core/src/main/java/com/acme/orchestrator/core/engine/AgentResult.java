@@ -16,9 +16,10 @@ public sealed interface AgentResult {
     }
   }
 
-  record Failure(String reason) implements AgentResult {
+  record Failure(String reason, FailureKind kind) implements AgentResult {
     public Failure {
       Objects.requireNonNull(reason, "reason");
+      Objects.requireNonNull(kind, "kind");
     }
   }
 
@@ -26,7 +27,12 @@ public sealed interface AgentResult {
     return new Success(List.of(artifacts), summary);
   }
 
+  /** The agent's output wasn't good enough (it may retry with feedback). */
   static Failure failure(String reason) {
-    return new Failure(reason);
+    return new Failure(reason, FailureKind.VALIDATION);
+  }
+
+  static Failure failure(String reason, FailureKind kind) {
+    return new Failure(reason, kind);
   }
 }

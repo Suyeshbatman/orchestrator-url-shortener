@@ -36,11 +36,13 @@ public sealed interface Command {
   }
 
   /** An attempt failed: the agent said so, threw, or timed out. */
-  record StageFailed(String stageKey, long dispatch, String reason, List<PolicyCheck> checks)
+  record StageFailed(
+      String stageKey, long dispatch, String reason, FailureKind kind, List<PolicyCheck> checks)
       implements Command {
     public StageFailed {
       Objects.requireNonNull(stageKey, "stageKey");
       Objects.requireNonNull(reason, "reason");
+      Objects.requireNonNull(kind, "kind");
       checks = List.copyOf(checks);
     }
   }
@@ -98,6 +100,16 @@ public sealed interface Command {
    */
   record ApprovalTimeout(String stageKey, long request) implements Command {
     public ApprovalTimeout {
+      Objects.requireNonNull(stageKey, "stageKey");
+    }
+  }
+
+  /**
+   * Internal: a retry's backoff elapsed. {@code retry} is the seq of its STAGE_RETRIED, so a timer
+   * from before a halt can't start an attempt later.
+   */
+  record RetryDue(String stageKey, long retry) implements Command {
+    public RetryDue {
       Objects.requireNonNull(stageKey, "stageKey");
     }
   }

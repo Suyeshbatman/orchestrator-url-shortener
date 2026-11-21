@@ -26,6 +26,7 @@ import java.util.Optional;
  *
  * <ul>
  *   <li>STAGE_READY on an INVALIDATED stage first resets it (a new loop), then marks it ready.
+ *   <li>FALLBACK_USED, like STAGE_RETRIED, schedules another attempt (RUNNING → RETRYING).
  *   <li>RUN_HALTED halts every stage that is in progress (PENDING, READY, RUNNING,
  *       WAITING_APPROVAL, RETRYING); RUN_RESUMED resets every HALTED stage to PENDING.
  *   <li>ROLLED_BACK with a stage rolls that stage back; without one, the whole run.
@@ -163,7 +164,7 @@ public final class RunStateProjector {
           case APPROVAL_REJECTED -> StageEvent.REJECT;
           case STAGE_SUCCEEDED -> StageEvent.SUCCEED;
           case STAGE_FAILED -> StageEvent.FAIL;
-          case STAGE_RETRIED -> StageEvent.SCHEDULE_RETRY;
+          case STAGE_RETRIED, FALLBACK_USED -> StageEvent.SCHEDULE_RETRY;
           case STAGE_SKIPPED -> StageEvent.SKIP;
           case STAGE_INVALIDATED -> StageEvent.INVALIDATE;
           default -> null;

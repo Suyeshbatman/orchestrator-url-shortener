@@ -5,6 +5,7 @@ import static com.acme.orchestrator.core.event.EventType.APPROVAL_GRANTED;
 import static com.acme.orchestrator.core.event.EventType.APPROVAL_REJECTED;
 import static com.acme.orchestrator.core.event.EventType.APPROVAL_REQUESTED;
 import static com.acme.orchestrator.core.event.EventType.ARTIFACT_PRODUCED;
+import static com.acme.orchestrator.core.event.EventType.FALLBACK_USED;
 import static com.acme.orchestrator.core.event.EventType.GATE_EVALUATED;
 import static com.acme.orchestrator.core.event.EventType.POLICY_EVALUATED;
 import static com.acme.orchestrator.core.event.EventType.REPLAN_TRIGGERED;
@@ -16,6 +17,7 @@ import static com.acme.orchestrator.core.event.EventType.RUN_RESUMED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_FAILED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_INVALIDATED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_READY;
+import static com.acme.orchestrator.core.event.EventType.STAGE_RETRIED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_SKIPPED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_STARTED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_SUCCEEDED;
@@ -31,6 +33,7 @@ import com.acme.orchestrator.core.engine.Command.ApprovalDecision;
 import com.acme.orchestrator.core.engine.Command.ApprovalTimeout;
 import com.acme.orchestrator.core.engine.Command.Halt;
 import com.acme.orchestrator.core.engine.Command.Resume;
+import com.acme.orchestrator.core.engine.Command.RetryDue;
 import com.acme.orchestrator.core.engine.Command.StageCompleted;
 import com.acme.orchestrator.core.engine.Command.StageFailed;
 import com.acme.orchestrator.core.engine.Command.Wake;
@@ -46,6 +49,7 @@ import com.acme.orchestrator.core.model.Condition;
 import com.acme.orchestrator.core.model.Executor;
 import com.acme.orchestrator.core.model.GateCatalog;
 import com.acme.orchestrator.core.model.GateRef;
+import com.acme.orchestrator.core.model.OnFailure;
 import com.acme.orchestrator.core.model.ProducedBy;
 import com.acme.orchestrator.core.model.Run;
 import com.acme.orchestrator.core.model.RunStatus;
@@ -76,6 +80,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
@@ -164,6 +169,9 @@ public final class Coordinator implements AutoCloseable {
 
   /** Stage key → seq of its open APPROVAL_REQUESTED (for the timeout). Coordinator thread only. */
   private final Map<String, Long> approvalRequests = new LinkedHashMap<>();
+
+  /** Stage key → seq of its STAGE_RETRIED awaiting the backoff. Coordinator thread only. */
+  private final Map<String, Long> retryTimers = new LinkedHashMap<>();
 
   private boolean broken;
 
@@ -337,6 +345,7 @@ public final class Coordinator implements AutoCloseable {
       case StageFailed f -> onFailed(f);
       case ApprovalDecision d -> onApproval(d);
       case ApprovalTimeout t -> onApprovalTimeout(t);
+      case RetryDue r -> onRetryDue(r);
       case AmendRequirement a -> runEvent(REPLAN_TRIGGERED, a.by(), Map.of("amendment", a.text()));
       case Halt h -> {
         RunStatus status = current.run().status();
@@ -402,13 +411,19 @@ public final class Coordinator implements AutoCloseable {
     }
     Optional<String> entryFailure = evaluateGates(def, GateContext.Phase.ENTRY, List.of());
     if (entryFailure.isPresent()) {
-      stageEvent(STAGE_FAILED, stageId, Actor.SYSTEM, Map.of("reason", entryFailure.get()));
+      // the inputs are what they are: retrying the stage can't help
+      failAttempt(stageId, entryFailure.get(), FailureKind.FATAL, Actor.SYSTEM);
       return;
     }
     dispatch(stageId, def);
   }
 
   private void dispatch(String stageId, StageDefinition def) {
+    dispatch(stageId, def, Optional.empty());
+  }
+
+  /** Starts an attempt; {@code fallback} is the strategy when it is the fallback attempt. */
+  private void dispatch(String stageId, StageDefinition def, Optional<String> fallback) {
     stageEvent(STAGE_STARTED, stageId, Actor.SYSTEM, Map.of());
     long dispatch = current.lastSeq();
     inFlight.put(stageId, dispatch);
@@ -419,7 +434,10 @@ public final class Coordinator implements AutoCloseable {
         AGENT_INVOKED,
         stageId,
         actorOf(def),
-        Map.of("executor", executor.name(), "attempt", attempt));
+        fallback
+            .<Map<String, Object>>map(
+                f -> Map.of("executor", executor.name(), "attempt", attempt, "fallback", f))
+            .orElseGet(() -> Map.of("executor", executor.name(), "attempt", attempt)));
 
     StageContext context =
         new StageContext(
@@ -429,7 +447,8 @@ public final class Coordinator implements AutoCloseable {
             feedback(stageId),
             services.artifacts(),
             services.tools(),
-            services.policies());
+            services.policies(),
+            fallback);
     Duration timeout = def.timeout();
     CompletableFuture.supplyAsync(() -> execute(agent, context), workers)
         .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
@@ -453,11 +472,8 @@ public final class Coordinator implements AutoCloseable {
             .map(check -> check.describe() + " (" + policyIds(check, Effect.DENY) + ")")
             .toList();
     if (!denied.isEmpty()) {
-      stageEvent(
-          STAGE_FAILED,
-          stageId,
-          Actor.SYSTEM,
-          Map.of("reason", "policy denied: " + String.join("; ", denied)));
+      failAttempt(
+          stageId, "policy denied: " + String.join("; ", denied), FailureKind.FATAL, Actor.SYSTEM);
       return;
     }
 
@@ -488,17 +504,14 @@ public final class Coordinator implements AutoCloseable {
                 "contentHash", a.contentHash()));
       }
     } catch (IllegalArgumentException e) {
-      stageEvent(
-          STAGE_FAILED,
-          stageId,
-          Actor.SYSTEM,
-          Map.of("reason", "could not store artifact: " + e.getMessage()));
+      failAttempt(
+          stageId, "could not store artifact: " + e.getMessage(), FailureKind.FATAL, Actor.SYSTEM);
       return;
     }
 
     Optional<String> exitFailure = evaluateGates(def, GateContext.Phase.EXIT, produced);
     if (exitFailure.isPresent()) {
-      stageEvent(STAGE_FAILED, stageId, Actor.SYSTEM, Map.of("reason", exitFailure.get()));
+      failAttempt(stageId, exitFailure.get(), FailureKind.VALIDATION, Actor.SYSTEM);
       return;
     }
     OptionalInt risk = stageRisk(c);
@@ -574,25 +587,13 @@ public final class Coordinator implements AutoCloseable {
 
     long request = current.lastSeq();
     approvalRequests.put(def.id(), request);
-    def.approval()
-        .timeout()
-        .ifPresent(t ->
-            CompletableFuture.delayedExecutor(t.toMillis(), TimeUnit.MILLISECONDS)
-                .execute(() -> {
-                  if (!closed) {
-                    inbox.add(new ApprovalTimeout(def.id(), request));
-                  }
-                }));
+    def.approval().timeout().ifPresent(t -> later(t, new ApprovalTimeout(def.id(), request)));
   }
 
   private void onFailed(StageFailed f) {
     recordChecks(f.stageKey(), f.checks());
     if (isCurrentAttempt(f.stageKey(), f.dispatch())) {
-      stageEvent(
-          STAGE_FAILED,
-          f.stageKey(),
-          actorOf(stages.get(f.stageKey())),
-          Map.of("reason", f.reason()));
+      failAttempt(f.stageKey(), f.reason(), f.kind(), actorOf(stages.get(f.stageKey())));
     }
   }
 
@@ -645,20 +646,18 @@ public final class Coordinator implements AutoCloseable {
     if (used < allowed) {
       dispatch(d.stageKey(), def); // the comment reaches the agent through feedback()
     } else {
-      stageEvent(
-          STAGE_FAILED,
+      failAttempt(
           d.stageKey(),
-          Actor.SYSTEM,
-          Map.of(
-              "reason",
-              "rejected by "
-                  + d.approver()
-                  + " and no attempts are left ("
-                  + used
-                  + " of "
-                  + allowed
-                  + " used): "
-                  + d.comment()));
+          "rejected by "
+              + d.approver()
+              + " and no attempts are left ("
+              + used
+              + " of "
+              + allowed
+              + " used): "
+              + d.comment(),
+          FailureKind.FATAL, // a human said no: no automatic second guess
+          Actor.SYSTEM);
     }
   }
 
@@ -679,6 +678,163 @@ public final class Coordinator implements AutoCloseable {
                   + stages.get(t.stageKey()).approval().timeout().orElseThrow(),
               "stageId",
               t.stageKey()));
+    }
+  }
+
+  // ---- failure handling -----------------------------------------------------------------------
+
+  /**
+   * An attempt failed. In order: a validation failure of a stage with {@code onFailure} loops back
+   * (while loops remain); a retryable failure is retried after a backoff (while attempts remain),
+   * then the stage's fallback is tried once; otherwise the stage fails, which fails the run (or,
+   * for a {@code highImpact} stage, halts it for a human).
+   */
+  private void failAttempt(String stageKey, String reason, FailureKind kind, Actor actor) {
+    StageDefinition def = stages.get(stageKey);
+    StageInstance stage = current.stages().get(stageKey);
+    if (stage.status() == StageStatus.RUNNING) {
+      if (kind == FailureKind.VALIDATION && def.onFailure().isPresent() && loopBack(def, reason)) {
+        return;
+      }
+      if (kind.retryable() && stage.attempt() < def.retry().maxAttempts()) {
+        scheduleRetry(def, stage, reason, kind);
+        return;
+      }
+      if (kind.retryable() && def.fallback().isPresent() && !fallbackUsedThisLoop(stageKey)) {
+        String strategy = def.fallback().get().strategy();
+        stageEvent(
+            FALLBACK_USED,
+            stageKey,
+            Actor.SYSTEM,
+            Map.of("strategy", strategy, "reason", reason, "kind", kind)); // → RETRYING
+        dispatch(stageKey, def, Optional.of(strategy));
+        return;
+      }
+    }
+    if (def.highImpact()) {
+      runEvent(
+          RUN_HALTED,
+          Actor.SYSTEM,
+          Map.of(
+              "reason",
+              "high-impact stage " + stageKey + " failed: " + reason,
+              "stageId",
+              stageKey,
+              "kind",
+              kind));
+      return;
+    }
+    stageEvent(STAGE_FAILED, stageKey, actor, Map.of("reason", reason, "kind", kind));
+  }
+
+  private void scheduleRetry(
+      StageDefinition def, StageInstance stage, String reason, FailureKind kind) {
+    Duration delay = def.retry().delayAfter(stage.attempt(), ThreadLocalRandom.current());
+    stageEvent(
+        STAGE_RETRIED,
+        def.id(),
+        Actor.SYSTEM,
+        Map.of(
+            "reason", reason,
+            "kind", kind,
+            "attempt", stage.attempt(),
+            "maxAttempts", def.retry().maxAttempts(),
+            "delay", delay)); // → RETRYING
+    long retry = current.lastSeq();
+    retryTimers.put(def.id(), retry);
+    later(delay, new RetryDue(def.id(), retry));
+  }
+
+  /** Starts the retry if the stage is still waiting for the backoff the timer belongs to. */
+  private void onRetryDue(RetryDue r) {
+    if (statusOf(r.stageKey()) == StageStatus.RETRYING
+        && Long.valueOf(r.retry()).equals(retryTimers.get(r.stageKey()))) {
+      retryTimers.remove(r.stageKey());
+      dispatch(r.stageKey(), stages.get(r.stageKey()));
+    }
+  }
+
+  /**
+   * Re-runs {@code onFailure.loopTo} with this failure as feedback: the failing stage, the target
+   * and everything downstream of the target are invalidated, and the scheduler runs them again.
+   *
+   * @return false when the loops are used up
+   */
+  private boolean loopBack(StageDefinition def, String reason) {
+    OnFailure onFailure = def.onFailure().orElseThrow();
+    long loopsUsed =
+        stageEvents(def.id()).stream()
+            .filter(e -> e.type() == STAGE_INVALIDATED && e.payload().containsKey("loopTo"))
+            .count();
+    if (loopsUsed >= onFailure.maxLoops()) {
+      return false;
+    }
+    long loop = loopsUsed + 1;
+    String target = onFailure.loopTo();
+    String feedback =
+        def.id()
+            + " failed: "
+            + reason
+            + onFailure
+                .feedback()
+                .flatMap(type -> services.artifacts().latestOfType(runId, type))
+                .map(a -> " (see " + a.id() + ")")
+                .orElse("");
+    stageEvent(
+        STAGE_INVALIDATED,
+        def.id(),
+        Actor.SYSTEM,
+        Map.of(
+            "reason",
+            "looping back to " + target,
+            "loopTo",
+            target,
+            "loop",
+            loop,
+            "maxLoops",
+            onFailure.maxLoops()));
+    stageEvent(
+        STAGE_INVALIDATED,
+        target,
+        Actor.SYSTEM,
+        Map.of("reason", "re-run for " + def.id(), "loopFrom", def.id(), "feedback", feedback));
+    invalidateDownstream(target, "upstream " + target + " is re-running (loop " + loop + ")");
+    return true;
+  }
+
+  /** Whether the fallback already ran since the stage last became ready. */
+  private boolean fallbackUsedThisLoop(String stageKey) {
+    List<Event> events = stageEvents(stageKey);
+    for (int i = events.size() - 1; i >= 0; i--) {
+      EventType type = events.get(i).type();
+      if (type == FALLBACK_USED) {
+        return true;
+      }
+      if (type == STAGE_READY) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private List<Event> stageEvents(String stageKey) {
+    return services.events().events(runId).stream()
+        .filter(e -> e.stageId().filter(stageKey::equals).isPresent())
+        .toList();
+  }
+
+  /** Delivers {@code command} to the loop after {@code delay}, unless the coordinator closed. */
+  private void later(Duration delay, Command command) {
+    Runnable deliver =
+        () -> {
+          if (!closed) {
+            inbox.add(command);
+          }
+        };
+    if (delay.isZero()) {
+      deliver.run();
+    } else {
+      CompletableFuture.delayedExecutor(delay.toMillis(), TimeUnit.MILLISECONDS).execute(deliver);
     }
   }
 
@@ -808,29 +964,33 @@ public final class Coordinator implements AutoCloseable {
           cause instanceof TimeoutException
               ? "timed out after " + timeout
               : "agent threw " + cause.getClass().getSimpleName() + ": " + cause.getMessage();
-      return new StageFailed(stageId, dispatch, reason, context.checks());
+      return new StageFailed(stageId, dispatch, reason, FailureKind.of(cause), context.checks());
     }
     return switch (result) {
-      case null -> new StageFailed(stageId, dispatch, "agent returned no result", context.checks());
+      case null ->
+          new StageFailed(
+              stageId, dispatch, "agent returned no result", FailureKind.FATAL, context.checks());
       case AgentResult.Success s ->
           new StageCompleted(
               stageId, dispatch, s, context.reads(), context.checks(), context.reportedRisk());
       case AgentResult.Failure f ->
-          new StageFailed(stageId, dispatch, f.reason(), context.checks());
+          new StageFailed(stageId, dispatch, f.reason(), f.kind(), context.checks());
     };
   }
 
-  /** Failure reasons and rejection comments of earlier attempts, oldest first. */
+  /** Why earlier attempts failed, loop-back reasons and rejection comments, oldest first. */
   private List<String> feedback(String stageKey) {
     List<String> feedback = new ArrayList<>();
     for (Event e : services.events().events(runId)) {
       if (e.stageId().filter(stageKey::equals).isEmpty()) {
         continue;
       }
-      if (e.type() == STAGE_FAILED) {
+      if (e.type() == STAGE_FAILED || e.type() == STAGE_RETRIED || e.type() == FALLBACK_USED) {
         e.payloadString("reason").ifPresent(feedback::add);
       } else if (e.type() == APPROVAL_REJECTED) {
         e.payloadString("comment").ifPresent(c -> feedback.add("rejected: " + c));
+      } else if (e.type() == STAGE_INVALIDATED) {
+        e.payloadString("feedback").ifPresent(feedback::add); // a loop-back's reason
       }
     }
     return feedback;
