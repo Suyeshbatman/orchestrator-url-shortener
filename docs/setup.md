@@ -24,7 +24,6 @@ Copy-Item .env.example .env
 |---|---|
 | `SHORTENER_CODE_SECRET` | at least 32 random characters (the Feistel key) |
 | `SHORTENER_API_KEYS` | `name:sha256(key)`, comma-separated: who may create links |
-| `VISITOR_HASH_SALT_SECRET` | random; salts the visitor fingerprint in analytics |
 | `ORCH_OPERATOR_KEYS` / `ORCH_APPROVER_KEYS` | `name:sha256(key)`: who steers runs, who approves |
 | `ORCH_SOURCE_REPO` | a **bare** repository the runs clone and publish to, e.g. `../../shortener-remote.git` (relative to `orchestrator-app/`) |
 | `ORCH_LLM_MODE` | `replay` (default) — no API key needed |

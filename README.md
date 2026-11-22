@@ -50,7 +50,13 @@ shortener runs on port **8085** and the orchestrator on port **8086**.
 ## Documentation
 | | |
 |---|---|
+| [docs/technical-deep-dive.md](docs/technical-deep-dive.md) | The whole system in depth: requirements, system design, algorithms and data structures, concurrency, walkthroughs, failure modes, scaling, complexity |
 | [docs/architecture.md](docs/architecture.md) | Components, the orchestration model, control-flow diagrams, data model, decisions |
+| [docs/reference/api.md](docs/reference/api.md) | Both HTTP APIs: endpoints, roles, bodies, errors, headers |
+| [docs/reference/configuration.md](docs/reference/configuration.md) | Every setting of both apps and the CLI, with defaults |
+| [docs/reference/workflows-and-policies.md](docs/reference/workflows-and-policies.md) | Writing workflows, policies and autonomy levels; gates; failure handling |
+| [docs/operations/runbook.md](docs/operations/runbook.md) | Deploying, routine tasks, incident playbooks |
+| [docs/operations/observability.md](docs/operations/observability.md) | Metrics catalogue, alerts, logs, health |
 | [docs/setup.md](docs/setup.md) | Prerequisites, environment, running everything, live and record mode, troubleshooting |
 | [docs/demo.md](docs/demo.md) | The automatic demo and a 5-minute manual walkthrough of the dashboard |
 | [docs/testing.md](docs/testing.md) | The test pyramid, end-to-end and chaos tests, latency results, coverage |
@@ -60,6 +66,8 @@ shortener runs on port **8085** and the orchestrator on port **8086**.
 | [docs/adr/](docs/adr/) | Architecture decision records 0001–0009 |
 | [docs/known-issues.md](docs/known-issues.md) | BF-1, the seeded defect the brownfield scenario fixes |
 | [docs/plan/](docs/plan/) | The build plan and the design rationale |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Building, boundaries, standards, adding agents, gates, policies and scenarios, releases |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## Repository layout
 ```

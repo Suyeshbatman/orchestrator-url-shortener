@@ -21,7 +21,7 @@ new functionality, a change to existing behaviour with a bug fix, and an ambiguo
 | Artifact | Where |
 |---|---|
 | URL shortener: Feistel/Base62 codes, aliases, 302 redirects, L1+L2 cache with negative caching and a Redis breaker, rate limiting, async analytics, idempotency, RFC 9457 errors, metrics, health | `shortener-service/`, ADR-0001–0004 |
-| Engine: workflow loader, DAG with fan-out and joins, coordinator, 11-state stage machine, entry and exit gates, policy engine with autonomy levels, budgets, retries with jitter, fallbacks, loop-backs, Git checkpoints and rollback, safe stop and kill, recovery, re-planning | `orchestrator-core/` |
+| Engine: workflow loader, DAG with parallel branches and joins, coordinator, 11-state stage machine, entry and exit gates, policy engine with autonomy levels, budgets, retries with jitter, fallbacks, loop-backs, Git checkpoints and rollback, safe stop and kill, recovery, re-planning | `orchestrator-core/` |
 | 9 SDLC agents with prompts and JSON Schemas; LLM gateway (live / record / replay, redaction, schema repair, circuit breaker, fallback model); sandboxed tools | `orchestrator-agents/` |
 | REST API with operator and approver roles, Postgres event and artifact stores (append-only triggers), projections, lineage, metrics, dashboard (DAG, approvals, answers, amendments, lineage, audit) | `orchestrator-app/` |
 | Scenario runner and fixture recorder (`run-scenario`, `record-fixtures`) | `orchestrator-cli/` |
@@ -114,6 +114,8 @@ model time. Live calls took 1–15 minutes each for large replies.
   The head hash is not anchored externally.
 - **L-7** Latency figures come from replay runs, without model time. Live calls take minutes each.
 - **L-8** Live calls are non-streaming, so very large replies take many minutes.
+- **L-9** `expand: tasks` is parsed but not applied: implementation runs as one stage over all tasks
+  instead of one sub-stage per task (`Dag.expand` exists and is tested; the coordinator doesn't use it).
 
 ## Future work
 - **An egress allowlist for the sandbox** (Maven Central and the container registry only), closing

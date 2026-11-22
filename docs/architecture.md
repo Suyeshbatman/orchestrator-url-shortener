@@ -62,7 +62,9 @@ flowchart LR
 ```
 Stages with a thick border need a human approval.
 - **Skipping:** `impact_analysis` is skipped for GREENFIELD runs.
-- **Fan-out:** `implementation` expands per task in the task graph.
+- **Fan-out (not yet):** the workflow marks `implementation` with `expand: tasks`, and `Dag.expand`
+  (per-task sub-stages that keep the tasks' dependencies) exists and is tested. But the coordinator
+  doesn't apply it yet, so `implementation` runs as one stage over the whole task graph.
 - **Joins:** `validation` and `docs_finalize` wait for all their inputs.
 - **High impact:** `publish` halts the run, instead of failing it, if it fails.
 
@@ -213,5 +215,7 @@ Artifact types: `requirement`, `requirements_spec`, `answers`, `task_graph`, `im
 | [0008](adr/0008-record-replay-llm.md) | LLM calls are recorded and replayed by request hash |
 | [0009](adr/0009-deterministic-validation.md) | Every pass/fail decision is deterministic code |
 
-The reasoning behind each is in `docs/plan/DESIGN_RATIONALE.md`. Security is in `docs/security.md`
+The reasoning behind each is in `docs/plan/DESIGN_RATIONALE.md`. The algorithms, data structures,
+concurrency, failure modes and scaling are covered in depth in
+[technical-deep-dive.md](technical-deep-dive.md). Security is in `docs/security.md`
 and testing in `docs/testing.md`.
