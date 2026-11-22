@@ -28,6 +28,7 @@ Copy-Item .env.example .env
 | `ORCH_OPERATOR_KEYS` / `ORCH_APPROVER_KEYS` | `name:sha256(key)`: who steers runs, who approves |
 | `ORCH_SOURCE_REPO` | a **bare** repository the runs clone and publish to, e.g. `../../shortener-remote.git` (relative to `orchestrator-app/`) |
 | `ORCH_LLM_MODE` | `replay` (default) — no API key needed |
+| `ORCH_VALIDATION_SANDBOX` | `auto` (default: unreviewed live/record output is built in the Docker sandbox), `docker` (always) or `none` |
 
 To hash a key:
 ```
@@ -108,8 +109,11 @@ These modes cost API credit and are slow: implementation and test replies take m
 - **Without a key:** `record-fixtures <id>` writes each missing prompt to `replies/pending/` for
   you to answer by hand.
 - **Live runs in the app:** set `ORCH_LLM_MODE=live`. Model-written code then waits for approval
-  before validation builds it (CHG-005). Run live mode only on a disposable machine
-  (`docs/security.md`).
+  (CHG-005), and validation builds it in the Docker sandbox (`docs/security.md`, O-1).
+- **The sandbox:** the first sandboxed build downloads the Maven cache (volume
+  `orchestrator-sandbox-m2`) and the test images, which takes several minutes. Later builds take
+  about 1.5 minutes longer than on the host. Try it on a replay:
+  `run-scenario greenfield-qr-code --sandbox docker`.
 
 ## Troubleshooting
 | Symptom | Cause and fix |

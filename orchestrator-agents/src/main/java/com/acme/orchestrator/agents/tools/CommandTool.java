@@ -28,7 +28,8 @@ import java.util.regex.Pattern;
  * killed.
  *
  * <p>{@code mvn} runs the workspace's Maven wrapper when there is one (the version the repository
- * pins; on Windows {@code mvnw.cmd}); other programs are looked up on the PATH.
+ * pins; on Windows {@code mvnw.cmd}); other programs are looked up on the PATH. With a {@link
+ * Sandbox}, the allowed command runs there instead of on this machine.
  */
 public final class CommandTool {
 
@@ -51,11 +52,18 @@ public final class CommandTool {
   private final Workspace workspace;
   private final Authorizer authorizer;
   private final Duration timeout;
+  private final Optional<Sandbox> sandbox;
 
-  public CommandTool(Workspace workspace, Authorizer authorizer, Duration timeout) {
+  public CommandTool(
+      Workspace workspace, Authorizer authorizer, Duration timeout, Optional<Sandbox> sandbox) {
     this.workspace = Objects.requireNonNull(workspace, "workspace");
     this.authorizer = Objects.requireNonNull(authorizer, "authorizer");
     this.timeout = Objects.requireNonNull(timeout, "timeout");
+    this.sandbox = Objects.requireNonNull(sandbox, "sandbox");
+  }
+
+  public CommandTool(Workspace workspace, Authorizer authorizer, Duration timeout) {
+    this(workspace, authorizer, timeout, Optional.empty());
   }
 
   public CommandTool(Workspace workspace, Authorizer authorizer) {
@@ -72,11 +80,22 @@ public final class CommandTool {
       throw new PolicyDeniedException("running '" + line + "'", decision);
     }
     List<String> args = new ArrayList<>(Arrays.asList(line.split("\\s+")));
+    if (sandbox.isPresent()) {
+      return sandbox.get().run(List.copyOf(args), workspace.root(), timeout);
+    }
     args.set(0, resolve(args.getFirst()));
 
     ProcessBuilder builder = new ProcessBuilder(args).directory(workspace.root().toFile());
-    builder.redirectErrorStream(true);
     sanitize(builder.environment());
+    return execute(builder, timeout, line);
+  }
+
+  /**
+   * Starts the process, captures its output (stdout and stderr) and kills its whole tree when it
+   * runs out of time or the attempt is cancelled.
+   */
+  static Result execute(ProcessBuilder builder, Duration timeout, String line) {
+    builder.redirectErrorStream(true);
     long started = System.nanoTime();
     Process process;
     try {

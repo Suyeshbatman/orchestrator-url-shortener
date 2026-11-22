@@ -3,6 +3,8 @@ package com.acme.orchestrator.agents.sdlc;
 import com.acme.orchestrator.agents.tools.Authorizer;
 import com.acme.orchestrator.agents.tools.CommandTool;
 import com.acme.orchestrator.agents.tools.DiffTool;
+import com.acme.orchestrator.agents.tools.DockerSandbox;
+import com.acme.orchestrator.agents.tools.Sandbox;
 import com.acme.orchestrator.agents.tools.Workspace;
 import com.acme.orchestrator.core.engine.Agent;
 import com.acme.orchestrator.core.engine.AgentResult;
@@ -28,7 +30,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -50,41 +54,96 @@ public final class ValidationAgent implements Agent {
    * @param command must be on CMD-001's allowlist
    * @param module the Maven module whose reports are read (relative to the workspace)
    * @param coverageExcludes packages the coverage figure leaves out (like the module's own gate)
+   * @param sandboxing where the build runs (the build runs the code under test)
    */
   public record Settings(
-      String command, String module, Set<String> coverageExcludes, Duration timeout) {
+      String command,
+      String module,
+      Set<String> coverageExcludes,
+      Duration timeout,
+      Sandboxing sandboxing) {
 
     public static final Settings SHORTENER =
         new Settings(
             "mvn -q -pl shortener-service -am verify",
             "shortener-service",
             Set.of("com.acme.shortener.config"),
-            CommandTool.DEFAULT_TIMEOUT);
+            CommandTool.DEFAULT_TIMEOUT,
+            Sandboxing.AUTO);
 
     public Settings {
       Objects.requireNonNull(command, "command");
       Objects.requireNonNull(module, "module");
       coverageExcludes = Set.copyOf(coverageExcludes);
       Objects.requireNonNull(timeout, "timeout");
+      Objects.requireNonNull(sandboxing, "sandboxing");
+    }
+
+    public Settings(String command, String module, Set<String> coverageExcludes, Duration timeout) {
+      this(command, module, coverageExcludes, timeout, Sandboxing.AUTO);
+    }
+
+    public Settings withSandboxing(Sandboxing sandboxing) {
+      return new Settings(command, module, coverageExcludes, timeout, sandboxing);
+    }
+  }
+
+  /**
+   * Where the validation build runs. {@code AUTO}: in the Docker sandbox when the code is
+   * unreviewed model output (live and record modes), on this machine otherwise (replayed fixtures
+   * and hand-written replies were reviewed when they were committed). Configured with {@code
+   * ORCH_VALIDATION_SANDBOX=auto|docker|none}.
+   */
+  public enum Sandboxing {
+    NONE,
+    AUTO,
+    DOCKER;
+
+    public static Sandboxing parse(String value) {
+      return value == null || value.isBlank()
+          ? AUTO
+          : Sandboxing.valueOf(value.strip().toUpperCase(java.util.Locale.ROOT));
     }
   }
 
   static final int SUMMARY_LINES = 40;
 
-  /** Maven's boilerplate after the real errors. */
   /** Test timings ("Time elapsed: 7.6 s"): they differ on every run. */
   private static final Pattern ELAPSED = Pattern.compile(",? *(-- )?Time elapsed: [0-9.,]+ s");
 
+  /** Maven's boilerplate after the real errors. */
   private static final Pattern MAVEN_HINT =
       Pattern.compile(
           "\\[ERROR\\]\\s*(-> \\[Help.*|Re-run Maven.*|To see the full.*|For more.*|\\[Help.*)?");
 
   private final PolicyEngine policies;
   private final Settings settings;
+  private final Optional<Sandbox> sandbox;
 
   public ValidationAgent(PolicyEngine policies, Settings settings) {
+    this(policies, settings, false, DockerSandbox::new);
+  }
+
+  /**
+   * @param unreviewedCode the code comes from a live model no human has reviewed
+   * @param sandboxes makes the sandbox when the settings call for one
+   */
+  public ValidationAgent(
+      PolicyEngine policies,
+      Settings settings,
+      boolean unreviewedCode,
+      Supplier<? extends Sandbox> sandboxes) {
     this.policies = Objects.requireNonNull(policies, "policies");
     this.settings = Objects.requireNonNull(settings, "settings");
+    boolean sandboxed =
+        settings.sandboxing() == Sandboxing.DOCKER
+            || (settings.sandboxing() == Sandboxing.AUTO && unreviewedCode);
+    this.sandbox = sandboxed ? Optional.of(sandboxes.get()) : Optional.empty();
+  }
+
+  /** Whether this agent's builds run in the sandbox. */
+  public boolean sandboxed() {
+    return sandbox.isPresent();
   }
 
   @Override
@@ -94,7 +153,8 @@ public final class ValidationAgent implements Agent {
     clearReports(workspace, module); // never judge this attempt by an earlier build's reports
 
     CommandTool.Result build =
-        new CommandTool(workspace, Authorizer.of(ctx), settings.timeout()).run(settings.command());
+        new CommandTool(workspace, Authorizer.of(ctx), settings.timeout(), sandbox)
+            .run(settings.command());
     BuildReports.Tests tests = BuildReports.tests(module);
     double coverage = BuildReports.lineCoverage(module, settings.coverageExcludes());
     DiffTool.Result diff = new DiffTool(workspace).diff();
@@ -143,8 +203,9 @@ public final class ValidationAgent implements Agent {
     String line =
         String.format(
             Locale.ROOT,
-            "build %s, %d tests (%d failed, %d errors), line coverage %.2f, policy %s",
+            "build %s%s, %d tests (%d failed, %d errors), line coverage %.2f, policy %s",
             build.succeeded() ? "SUCCESS" : (build.timedOut() ? "TIMED OUT" : "FAILURE"),
+            sandbox.isPresent() ? " (sandboxed)" : "",
             tests.total(),
             tests.failed(),
             tests.errors(),

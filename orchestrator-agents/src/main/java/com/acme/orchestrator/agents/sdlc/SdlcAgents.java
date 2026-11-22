@@ -1,5 +1,6 @@
 package com.acme.orchestrator.agents.sdlc;
 
+import com.acme.orchestrator.agents.tools.DockerSandbox;
 import com.acme.orchestrator.core.engine.Agent;
 import com.acme.orchestrator.core.policy.PolicyEngine;
 import java.util.LinkedHashMap;
@@ -23,7 +24,9 @@ public final class SdlcAgents {
     agents.put(ImplementationAgent.NAME, new ImplementationAgent(kit));
     agents.put(TestAuthoringAgent.NAME, new TestAuthoringAgent(kit));
     agents.put(DocsAgent.NAME, new DocsAgent(kit));
-    agents.put(ValidationAgent.NAME, new ValidationAgent(policies, validation));
+    agents.put(
+        ValidationAgent.NAME,
+        new ValidationAgent(policies, validation, kit.unreviewedOutput(), DockerSandbox::new));
     agents.put(ReleaseAgent.NAME, new ReleaseAgent(kit));
     return Map.copyOf(agents);
   }

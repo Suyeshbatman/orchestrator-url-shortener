@@ -15,7 +15,7 @@ stale failures from the earlier run would fail the new one.
 | Property | Base62/Feistel bijection, DAG ordering (jqwik) | `Base62Test`, `FeistelPermutationTest`, `orchestrator-core` DAG tests |
 | Architecture | ArchUnit rules, listed below | `ArchitectureTest` in core, agents and the shortener |
 | Integration | real Postgres and Redis through Testcontainers (`postgres:16-alpine`, `redis:7-alpine`); nothing mocks the database | `*IT` |
-| End to end | the three scenarios through the orchestrator's HTTP API on Postgres, real agents replaying fixtures, real Git, a real Maven build of the shortener inside each run | `ScenariosE2E` (`-Pe2e`) |
+| End to end | the three scenarios through the orchestrator's HTTP API on Postgres, real agents replaying fixtures, real Git, a real Maven build of the shortener inside each run; and 7.1 again with every build in the Docker sandbox | `ScenariosE2E`, `SandboxedScenarioE2E` (`-Pe2e`) |
 | Chaos | the failure modes listed below | |
 | Load | redirect latency of cached links over HTTP | `RedirectLatencyIT` |
 

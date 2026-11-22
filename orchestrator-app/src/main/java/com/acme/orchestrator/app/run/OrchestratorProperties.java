@@ -16,6 +16,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param recoverOnStartup resume unfinished runs when the app starts
  * @param operatorKeys {@code name:sha256hex(key)}, comma-separated: may start and steer runs
  * @param approverKeys same format: may decide approvals (a person can be in both lists)
+ * @param validationSandbox where validation builds run: auto (the Docker sandbox for unreviewed
+ *     model output), docker (always) or none
  */
 @ConfigurationProperties("orchestrator")
 public record OrchestratorProperties(
@@ -28,7 +30,8 @@ public record OrchestratorProperties(
     @DefaultValue("true") boolean recoverOnStartup,
     @DefaultValue("30s") Duration safeStopGrace,
     @DefaultValue("") String operatorKeys,
-    @DefaultValue("") String approverKeys) {
+    @DefaultValue("") String approverKeys,
+    @DefaultValue("auto") String validationSandbox) {
 
   // Directories are bound as text and resolved against the file system here: Spring's own Path
   // conversion would also look on the classpath, where a "config" folder may exist.

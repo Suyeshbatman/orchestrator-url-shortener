@@ -95,6 +95,16 @@ public final class ScenarioRunner {
   }
 
   public Outcome run(String scenarioId, LlmMode mode, Duration timeout) throws Exception {
+    return run(scenarioId, mode, timeout, ValidationAgent.Sandboxing.AUTO);
+  }
+
+  /**
+   * @param sandboxing where the validation builds run ({@code AUTO}: the Docker sandbox for record
+   *     and live output)
+   */
+  public Outcome run(
+      String scenarioId, LlmMode mode, Duration timeout, ValidationAgent.Sandboxing sandboxing)
+      throws Exception {
     Path root = env.repoRoot();
     Scenario scenario = Scenario.load(root.resolve("scenarios"), scenarioId);
     Path work = root.resolve(".orchestrator").resolve("scenarios").resolve(scenarioId);
@@ -126,7 +136,9 @@ public final class ScenarioRunner {
             AgentKit.SHORTENER,
             mode == LlmMode.RECORD || mode == LlmMode.LIVE);
     Map<String, Agent> agents =
-        new HashMap<>(SdlcAgents.standard(kit, policies, ValidationAgent.Settings.SHORTENER));
+        new HashMap<>(
+            SdlcAgents.standard(
+                kit, policies, ValidationAgent.Settings.SHORTENER.withSandboxing(sandboxing)));
     agents.put(MergeToMainAction.NAME, new MergeToMainAction(workspaces::create, "main", clock));
 
     Run run = Run.create(runId, workflow, scenario.mode(), scenario.autonomy());

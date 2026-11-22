@@ -1,5 +1,6 @@
 package com.acme.orchestrator.cli;
 
+import com.acme.orchestrator.agents.sdlc.ValidationAgent;
 import com.acme.orchestrator.cli.ScenarioRunner.LlmMode;
 import java.net.URI;
 import java.nio.file.Path;
@@ -23,12 +24,15 @@ public final class Main {
                                the orchestrator app on a fresh database, the three scenarios
                                through its API with scripted humans, audit checks, metrics.
         run-scenario <id> [--llm replay|record|handwritten|live] [--timeout 60m]
+                     [--sandbox auto|docker|none]
                                Run one scenario end to end in this process (scripted humans,
                                real agents, real Git and Maven). Default --llm replay.
                                  record       call the model and save scenarios/<id>/replay/
                                               (needs ANTHROPIC_API_KEY; replies/ take precedence)
                                  handwritten  only replies/<Agent>-<n>.json, no API key; a missing
                                               reply's prompt is written to replies/pending/
+                               --sandbox: where validation builds run; auto = the Docker
+                                 sandbox for record and live output, this machine otherwise
         record-fixtures <id>   Same as run-scenario <id> --llm handwritten
         verify-audit <runId> --key <api key> [--url http://localhost:8086]
                                Recompute a run's hash chain on a running orchestrator
@@ -60,7 +64,11 @@ public final class Main {
                 : LlmMode.valueOf(option(args, "--llm", "replay").toUpperCase(Locale.ROOT));
         ScenarioRunner.Outcome outcome =
             new ScenarioRunner(environment(), System.out)
-                .run(args.get(1), mode, duration(option(args, "--timeout", "60m")));
+                .run(
+                    args.get(1),
+                    mode,
+                    duration(option(args, "--timeout", "60m")),
+                    ValidationAgent.Sandboxing.parse(option(args, "--sandbox", "auto")));
         return outcome.expected() && outcome.audit().valid() ? 0 : 1;
       }
       case "demo" -> {

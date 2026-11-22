@@ -5,7 +5,9 @@ import static com.acme.orchestrator.core.event.EventType.APPROVAL_REJECTED;
 import static com.acme.orchestrator.core.event.EventType.APPROVAL_REQUESTED;
 import static com.acme.orchestrator.core.event.EventType.FALLBACK_USED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_FAILED;
+import static com.acme.orchestrator.core.event.EventType.STAGE_INVALIDATED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_RETRIED;
+import static com.acme.orchestrator.core.event.EventType.STAGE_STARTED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_SUCCEEDED;
 
 import com.acme.orchestrator.core.event.Event;
@@ -15,8 +17,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Reliability figures computed from event logs (the source of truth, so they survive restarts and
@@ -24,11 +28,14 @@ import java.util.Map;
  *
  * <ul>
  *   <li>run success rate: completed / (completed + failed) over finished runs;
- *   <li>stage success rate: STAGE_SUCCEEDED / (STAGE_SUCCEEDED + STAGE_FAILED);
+ *   <li>stage success rate: successes / (successes + STAGE_FAILED). A success is STAGE_SUCCEEDED,
+ *       or the approval of a stage that has run (a post-run approval completes the stage without a
+ *       STAGE_SUCCEEDED event); an approval given before a stage runs does not complete it;
  *   <li>retry rate: retries per started attempt;
  *   <li>rollback frequency: ROLLED_BACK events per run;
- *   <li>MTTR: mean of stage incidents, each from a stage's first failure signal (retry, fallback or
- *       failure) to that stage's next success; incidents not yet resolved are counted apart;
+ *   <li>MTTR: mean of stage incidents, each from a stage's first failure signal (retry, fallback,
+ *       failure, or a validation loop-back) to that stage's next success; incidents not yet
+ *       resolved are counted apart. A human rejection is governance, not an incident;
  *   <li>end-to-end latency of completed runs (p50, p95), also with the time spent waiting for
  *       approvals taken out, and the mean approval wait itself, so human time is not hidden in
  *       agent latency.
@@ -82,6 +89,8 @@ public record ReliabilitySummary(
       }
       Instant created = log.getFirst().timestamp();
       Map<String, Instant> incidentStart = new HashMap<>();
+      Set<String> running = new HashSet<>(); // started, and not yet finished one way or another
+      Set<String> completedByApproval = new HashSet<>();
       Map<String, Instant> waitingSince = new HashMap<>();
       Duration runWait = Duration.ZERO;
       EventType end = null;
@@ -94,7 +103,6 @@ public record ReliabilitySummary(
           case STAGE_RETRIED -> retries++;
           case FALLBACK_USED -> fallbacks++;
           case ROLLED_BACK -> rollbacks++;
-          case STAGE_SUCCEEDED -> stageSucceeded++;
           case STAGE_FAILED -> stageFailed++;
           case RUN_HALTED -> halt = true;
           case RUN_RESUMED -> halt = false;
@@ -104,9 +112,40 @@ public record ReliabilitySummary(
           }
           default -> {}
         }
-        if (e.type() == STAGE_RETRIED || e.type() == FALLBACK_USED || e.type() == STAGE_FAILED) {
+        boolean succeeded = false;
+        switch (e.type()) {
+          case STAGE_STARTED -> {
+            running.add(stage);
+            completedByApproval.remove(stage);
+          }
+          // a STAGE_SUCCEEDED right after the approval that completed the stage is the same success
+          case STAGE_SUCCEEDED -> succeeded = !completedByApproval.remove(stage);
+          case APPROVAL_GRANTED -> {
+            succeeded = running.contains(stage);
+            if (succeeded) {
+              completedByApproval.add(stage);
+            }
+          }
+          default -> {}
+        }
+        if (succeeded) {
+          stageSucceeded++;
+        }
+        if (succeeded
+            || e.type() == STAGE_FAILED
+            || e.type() == STAGE_RETRIED
+            || e.type() == FALLBACK_USED
+            || e.type() == STAGE_INVALIDATED
+            || e.type() == APPROVAL_REJECTED) {
+          running.remove(stage);
+        }
+        boolean loopBack = e.type() == STAGE_INVALIDATED && e.payload().containsKey("loopTo");
+        if (e.type() == STAGE_RETRIED
+            || e.type() == FALLBACK_USED
+            || e.type() == STAGE_FAILED
+            || loopBack) {
           incidentStart.putIfAbsent(stage, e.timestamp());
-        } else if (e.type() == STAGE_SUCCEEDED && incidentStart.containsKey(stage)) {
+        } else if (succeeded && incidentStart.containsKey(stage)) {
           incidents.add(Duration.between(incidentStart.remove(stage), e.timestamp()));
         }
         if (e.type() == APPROVAL_REQUESTED) {

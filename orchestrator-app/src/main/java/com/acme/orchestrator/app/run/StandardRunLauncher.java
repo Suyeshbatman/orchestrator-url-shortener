@@ -90,7 +90,12 @@ public final class StandardRunLauncher implements RunLauncher {
             llmConfig.mode() != LlmGateways.Mode.REPLAY); // live output: reviewed before it builds
 
     Map<String, Agent> agents =
-        new HashMap<>(SdlcAgents.standard(kit, policies, ValidationAgent.Settings.SHORTENER));
+        new HashMap<>(
+            SdlcAgents.standard(
+                kit,
+                policies,
+                ValidationAgent.Settings.SHORTENER.withSandboxing(
+                    ValidationAgent.Sandboxing.parse(props.validationSandbox()))));
     agents.put(
         MergeToMainAction.NAME,
         new MergeToMainAction(workspaces::create, workspaces.baseBranch(), clock));

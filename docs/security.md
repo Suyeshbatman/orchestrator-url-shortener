@@ -10,7 +10,7 @@ or data loss, **MED** a real weakness with a limited blast radius, and **LOW** h
 ## Summary
 | # | Finding | Severity | Status |
 |---|---|---|---|
-| O-1 | Validation builds and runs model-written code before any human sees it | **HIGH** | **Fixed** (CHG-005); residual: no sandbox |
+| O-1 | Validation builds and runs model-written code before any human sees it | **HIGH** | **Fixed**: reviewed first (CHG-005), then built in a Docker sandbox; residual: network access |
 | O-2 | Prompt injection through repository content | MED | Mitigated by design; residual stated |
 | O-3 | Agent-chosen file paths and commands | MED | Mitigated (path guard, path jail, allowlist) |
 | O-4 | Secrets reaching the model or the build | MED | Mitigated (redaction, environment scrubbing, SEC-001) |
@@ -52,10 +52,29 @@ saw it first unless a change policy happened to match.
 - **Tests.** `PolicyEngineTest.chg005UnreviewedModelCodeIsReviewedBeforeItBuilds` and
   `WorkspaceAndFilesTest.writesOfUnreviewedModelOutputAreMarkedForThePolicies`.
 
-**Residual.** The build still runs on the host after approval. A reviewer can miss a malicious line
-in a large patch. Run live mode only on a disposable VM or a dedicated build host without
-credentials. A real sandbox (the build in a container with no network, and Testcontainers against a
-separate Docker daemon) is the next step.
+**Then it is built in a sandbox** (`DockerSandbox`, used whenever the code is unreviewed: live and
+record modes; `ORCH_VALIDATION_SANDBOX=auto`). For each validation build:
+- **A private Docker daemon** (`docker:29.7.2-dind`) on a network of its own. The shortener's
+  Testcontainers tests start their databases there. The build never gets this machine's Docker
+  socket, which would amount to administrator access. Only the private daemon is privileged, and it
+  runs inside Docker's VM.
+- **The build** runs in `eclipse-temurin:21.0.11_10-jdk` with the workspace's own Maven wrapper:
+  - only the run's workspace and a Maven cache volume are mounted, so it sees no home directory, no
+    `.env` and no credentials;
+  - only four variables are set (where Docker is, and Testcontainers settings). Nothing of this
+    machine's environment is passed in, which also closes O-7 for sandboxed builds;
+  - every Linux capability is dropped, `no-new-privileges` is set, and CPU (4), memory (6 GB) and
+    process count (4096) are limited.
+- **Cleanup.** Both containers and the network are removed afterwards, also on a timeout or an
+  error.
+- **Proof.** `SandboxedScenarioE2E` runs scenario 7.1 with every build in the sandbox. The replayed
+  fixtures still match, so the sandboxed build gives the same results (278 tests, 95 % coverage).
+  The cost is about 1.5 minutes per build.
+
+**Residual.** The sandbox has network access, because Maven and the test images are downloaded.
+Code under test could still send what it can see (the workspace) somewhere. The next step is an
+egress allowlist (Maven Central and the container registry only). A reviewer can still miss a
+malicious line that does its harm inside the shortener itself.
 
 ### O-2 Prompt injection through repository content (MED)
 Agents read the repository: the code map, the files they change, the tests they update, and the
@@ -119,8 +138,8 @@ defences are review, the real build and the independent tests, not detection.
 ### O-7 API key hashes in the build environment (LOW, residual)
 `ORCH_OPERATOR_KEYS` and `ORCH_APPROVER_KEYS` hold SHA-256 hashes, not keys, and their names
 don't look secret, so they reach the build's environment. Code under test could read them and
-brute-force a weak key offline. Use long random keys. If the build moves to a sandbox (O-1), switch
-the scrubbing to an allowlist.
+brute-force a weak key offline. Use long random keys. Sandboxed builds (O-1) get no variables of
+this machine's at all; builds of reviewed code on the host still use the denylist.
 
 ## Shortener: OWASP Top 10
 
@@ -185,8 +204,7 @@ L2. The defect is seeded on purpose and fixed by scenario 7.2, whose merge isn't
 See `docs/known-issues.md`.
 
 ## Residual risks, in order
-1. **Model-written code runs on the host after approval** (O-1). Use a disposable host for live
-   mode. A sandboxed build is the next step.
+1. **Sandboxed builds still have network access** (O-1). An egress allowlist is the next step.
 2. **Injection can bias code inside the allowed paths** (O-2). Review and the independent tests are
    the defence.
 3. **Phishing through the shortener** (S-2). Blocklists and moderation exist on the 7.3 branch;

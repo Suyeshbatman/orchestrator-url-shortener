@@ -35,7 +35,8 @@ new functionality, a change to existing behaviour with a bug fix, and an ambiguo
 - about 4 minutes.
 
 **Scenarios end to end.** `.\mvnw.cmd clean verify -Pe2e` runs all three through the HTTP API on
-Postgres in 430 s. Each one:
+Postgres in about 420 s, and
+`SandboxedScenarioE2E` runs 7.1 again with every build in the Docker sandbox (197 s). Each one:
 - uses the real agents replaying fixtures, real Git workspaces, and a real build of the shortener;
 - asserts the final status, its control events, a valid hash chain and non-zero metrics.
 
@@ -55,11 +56,12 @@ in `orchestrator-app/target/e2e/metrics-summary.json`):
 | Metric | Value |
 |---|---|
 | Runs | 3 total, 3 completed, 0 failed, 0 halted. Run success rate **1.0** |
-| Stage attempts | 44 (including the re-runs from the rejection, the loop-back and two re-plans) |
+| Stages | **39** succeeded, 0 failed: stage success rate **1.0**. A stage completed by an approval counts |
+| Stage attempts | 44 (39 successes, plus the attempts ended by the rejection, the loop-back, the denial and the two re-plans) |
 | Retries / fallbacks / rollbacks | 0 / **1** (the DENY → minimal patch in 7.2) / 0 |
-| MTTR | 0.24 s over 1 resolved incident, 0 open |
-| End-to-end latency, p50 / p95 | 109 s / 188 s (excluding approval wait: 103 s / 183 s) |
-| Approval wait | 21 decisions, mean 0.76 s, max 1.05 s (scripted approver) |
+| MTTR | **44.9 s** over 2 resolved incidents (the 7.2 validation loop-back, and the denied write and its fallback), 0 open |
+| End-to-end latency, p50 / p95 | 111 s / 189 s (excluding approval wait: 106 s / 183 s) |
+| Approval wait | 21 decisions, mean 0.73 s, max 1.03 s (scripted approver) |
 
 These are replay runs. The latency is the orchestration plus the real Maven builds; there is no
 model time. Live calls took 1–15 minutes each for large replies.
@@ -94,14 +96,15 @@ model time. Live calls took 1–15 minutes each for large replies.
   tested before use. The write-ups say so. Two replies in 7.2 are deliberately bad.
 - **Fixtures are pinned to a commit** (`base: phase-7`). Changing the shortener, a prompt or a schema
   on purpose means re-recording.
-- **Model-written code runs during validation.** CHG-005 puts a human review first in live mode, but
-  the build still runs on the host.
+- **Model-written code runs during validation.** In live mode a human reviews it first (CHG-005),
+  and it is built in a Docker sandbox with a private Docker daemon and no host credentials. The cost
+  is about 1.5 minutes more per build. The sandbox still has network access.
 - **One coordinator thread per run.** It's simple and deterministic, but not distributed.
 
 ## Limitations
 - **L-1** Replay shows the orchestration, not that a live model would produce the same code again.
-- **L-2** The validation build is not sandboxed: no network or credential isolation. Run live mode
-  on a disposable machine.
+- **L-2** Sandboxed validation builds still have network access: Maven and the test images are
+  downloaded. There is no egress allowlist yet.
 - **L-3** The scenario changes stay in each run's own repository and are not merged into this
   repository's `main`. `main` still has BF-1 on purpose.
 - **L-4** One orchestrator instance owns the runs: no leader election, no work distribution.
@@ -109,20 +112,15 @@ model time. Live calls took 1–15 minutes each for large replies.
   to 5 minutes.
 - **L-6** The hash chain is tamper-evident, not tamper-proof. A database superuser could rewrite it.
   The head hash is not anchored externally.
-- **L-7** Metrics gaps:
-  - the stage success rate counts only `STAGE_SUCCEEDED` events, and stages that end through an
-    approval don't emit one;
-  - MTTR counts retries, fallbacks and failures, not validation loop-backs.
+- **L-7** Latency figures come from replay runs, without model time. Live calls take minutes each.
 - **L-8** Live calls are non-streaming, so very large replies take many minutes.
 
 ## Future work
-- **Sandbox the build:** a container with no network and no credentials, with Testcontainers
-  against a separate Docker daemon. Then switch the build's environment scrubbing from a denylist to
-  an allowlist.
+- **An egress allowlist for the sandbox** (Maven Central and the container registry only), closing
+  L-2.
 - **Stream live calls**, and record a fully live run of each scenario when credit allows. Compare
   live and hand-written fixtures.
 - **Cross-instance cache invalidation** over Redis pub/sub, closing L-5.
 - **Anchor the audit head hash** in write-once storage, and sign events.
-- **Fix the metrics:** count approval-completed stages, and treat loop-backs as incidents.
 - **Run ownership** across orchestrator instances (a lease per run), or move the engine onto
   Temporal (ADR-0005).

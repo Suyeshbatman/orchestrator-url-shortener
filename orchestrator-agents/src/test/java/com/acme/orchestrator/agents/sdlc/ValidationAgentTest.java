@@ -4,6 +4,7 @@ import static com.acme.orchestrator.agents.sdlc.AgentHarness.SCHEMAS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.acme.orchestrator.agents.tools.CommandTool;
 import com.acme.orchestrator.agents.tools.TempRepo;
 import com.acme.orchestrator.agents.tools.Workspace;
 import com.acme.orchestrator.agents.tools.WorkspaceManager;
@@ -174,6 +175,55 @@ class ValidationAgentTest {
         .isEqualTo("SEC-001-no-secrets");
     assertThat(report.path("diff").path("paths").toString()).contains("Config.java");
     assertThat(gates()).containsEntry("policy.noDeny", false);
+  }
+
+  @Test
+  void unreviewedCodeIsBuiltInTheSandbox() {
+    List<List<String>> sandboxed = new java.util.ArrayList<>();
+    com.acme.orchestrator.agents.tools.Sandbox fake =
+        (args, root, timeout) -> {
+          sandboxed.add(args);
+          return new CommandTool.Result(0, "[INFO] BUILD SUCCESS", false, Duration.ofSeconds(1));
+        };
+    ValidationAgent.Settings settings =
+        new ValidationAgent.Settings(
+            BUILD, "shortener-service", Set.of("com.acme.shortener.config"), Duration.ofMinutes(2));
+    PolicyEngine policies = PolicyEngine.load(Path.of("..", "config"));
+
+    // AUTO: the sandbox only for unreviewed model output; DOCKER always; NONE never
+    assertThat(new ValidationAgent(policies, settings, false, () -> fake).sandboxed()).isFalse();
+    assertThat(
+            new ValidationAgent(
+                    policies,
+                    settings.withSandboxing(ValidationAgent.Sandboxing.DOCKER),
+                    false,
+                    () -> fake)
+                .sandboxed())
+        .isTrue();
+    assertThat(
+            new ValidationAgent(
+                    policies,
+                    settings.withSandboxing(ValidationAgent.Sandboxing.NONE),
+                    true,
+                    () -> fake)
+                .sandboxed())
+        .isFalse();
+
+    AgentResult result =
+        new ValidationAgent(policies, settings, true, () -> fake)
+            .execute(
+                h.context(
+                    "validation",
+                    List.of(),
+                    ToolRegistry.builder().register(Workspace.class, workspace).build(),
+                    COMMANDS,
+                    Optional.empty()));
+
+    assertThat(sandboxed).containsExactly(List.of(BUILD.split(" "))); // still policy-checked first
+    assertThat(((AgentResult.Success) result).summary()).startsWith("build SUCCESS (sandboxed),");
+    assertThat(ValidationAgent.Sandboxing.parse(" docker "))
+        .isEqualTo(ValidationAgent.Sandboxing.DOCKER);
+    assertThat(ValidationAgent.Sandboxing.parse(null)).isEqualTo(ValidationAgent.Sandboxing.AUTO);
   }
 
   @Test

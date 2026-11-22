@@ -77,6 +77,41 @@ class MetricsTest {
         .add(50, EventType.RUN_FAILED, null);
   }
 
+  /**
+   * How the engine really logs approvals: a post-run approval completes the stage without a
+   * STAGE_SUCCEEDED; publish is approved before it runs and then succeeds; validation loops back
+   * once; the design is rejected once by a human.
+   */
+  @Test
+  void approvalsCompleteStagesAndLoopBacksAreIncidents() {
+    Log run =
+        new Log("r5")
+            .add(1, EventType.STAGE_STARTED, "design")
+            .add(2, EventType.APPROVAL_REQUESTED, "design")
+            .add(3, EventType.APPROVAL_REJECTED, "design") // governance, not an incident
+            .add(4, EventType.STAGE_STARTED, "design")
+            .add(5, EventType.APPROVAL_REQUESTED, "design")
+            .add(6, EventType.APPROVAL_GRANTED, "design") // completes design
+            .add(10, EventType.STAGE_STARTED, "validation")
+            .add(20, EventType.STAGE_INVALIDATED, "validation", Map.of("loopTo", "implementation"))
+            .add(
+                21, EventType.STAGE_INVALIDATED, "implementation", Map.of("loopFrom", "validation"))
+            .add(30, EventType.STAGE_STARTED, "validation")
+            .add(40, EventType.APPROVAL_REQUESTED, "validation")
+            .add(50, EventType.APPROVAL_GRANTED, "validation") // completes validation: 30 s
+            .add(60, EventType.APPROVAL_REQUESTED, "publish") // before it runs
+            .add(61, EventType.APPROVAL_GRANTED, "publish")
+            .add(62, EventType.STAGE_STARTED, "publish")
+            .add(63, EventType.STAGE_SUCCEEDED, "publish")
+            .add(64, EventType.RUN_COMPLETED, null);
+
+    ReliabilitySummary s = ReliabilitySummary.compute(List.of(run.events));
+
+    assertThat(s.stages().succeeded()).isEqualTo(3); // design, validation, publish: once each
+    assertThat(s.stageSuccessRate()).isEqualTo(1.0);
+    assertThat(s.mttr()).isEqualTo(new ReliabilitySummary.Mttr(30.0, 1, 0)); // the loop-back only
+  }
+
   @Test
   void theSummaryIsComputedFromTheLogs() {
     Log halted =
