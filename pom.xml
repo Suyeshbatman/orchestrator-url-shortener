@@ -27,6 +27,7 @@
     <module>orchestrator-agents</module>
     <module>orchestrator-app</module>
     <module>orchestrator-cli</module>
+    <module>coverage-report</module>
   </modules>
 
   <properties>
@@ -35,6 +36,7 @@
     <jacoco.version>0.8.16</jacoco.version>
     <spotless.version>3.11.0</spotless.version>
     <jqwik.version>1.10.2</jqwik.version>
+    <archunit.version>1.5.1</archunit.version>
     <springdoc.version>3.2.1</springdoc.version>
     <resilience4j.version>2.4.0</resilience4j.version>
     <anthropic-java.version>3.6.0</anthropic-java.version>
@@ -88,6 +90,11 @@
         <groupId>net.jqwik</groupId>
         <artifactId>jqwik</artifactId>
         <version>${jqwik.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.tngtech.archunit</groupId>
+        <artifactId>archunit-junit5</artifactId>
+        <version>${archunit.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

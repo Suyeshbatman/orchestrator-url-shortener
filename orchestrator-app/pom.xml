@@ -103,6 +103,13 @@
 			<artifactId>awaitility</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- The scenario definitions (scenario.yml) the end-to-end tests replay. -->
+		<dependency>
+			<groupId>com.acme</groupId>
+			<artifactId>orchestrator-cli</artifactId>
+			<version>${project.version}</version>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
@@ -134,5 +141,38 @@
 			</plugin>
 		</plugins>
 	</build>
+
+	<!--
+	  .\mvnw.cmd verify -Pe2e: also runs the three scenarios end to end (*E2E classes) through the API
+	  on Postgres, each with a real Maven build of the shortener. About 10 minutes; Docker required.
+	-->
+	<profiles>
+		<profile>
+			<id>e2e</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-failsafe-plugin</artifactId>
+						<executions>
+							<execution>
+								<id>e2e</id>
+								<goals>
+									<goal>integration-test</goal>
+									<goal>verify</goal>
+								</goals>
+								<configuration>
+									<includes>
+										<include>**/*E2E.java</include>
+									</includes>
+									<summaryFile>${project.build.directory}/failsafe-reports/e2e-summary.xml</summaryFile>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 
 </project>
