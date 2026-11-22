@@ -40,7 +40,8 @@ Postgres in 430 s. Each one:
 - asserts the final status, its control events, a valid hash chain and non-zero metrics.
 
 The dashboard run of 7.3, with a person as approver, matched the CLI run event for event (205
-events, valid audit).
+events, valid audit). The demo (`orchestrator-cli demo`, `docs/demo.md`) runs all three through
+the API on a fresh database in 440 s and ends with every audit chain valid.
 
 | Scenario | Events | Shows |
 |---|---|---|
@@ -125,4 +126,3 @@ model time. Live calls took 1–15 minutes each for large replies.
 - **Fix the metrics:** count approval-completed stages, and treat loop-backs as incidents.
 - **Run ownership** across orchestrator instances (a lease per run), or move the engine onto
   Temporal (ADR-0005).
-- **A demo script** (`scripts/demo.sh` and `docs/demo.md`, Step 9.2).

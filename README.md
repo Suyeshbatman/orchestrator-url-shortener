@@ -36,6 +36,14 @@ ends with `COMPLETED` and `audit valid`. Each run makes real Git commits in a sa
 repository and runs the shortener's full Maven build with Testcontainers. Use `./mvnw` on macOS and
 Linux.
 
+The full demo runs the same three scenarios through the orchestrator's HTTP API on Postgres, with
+printed approval summaries, audit checks and the metrics summary. It takes about 8 minutes and
+starts `docker compose` itself:
+```
+.\mvnw.cmd -q -pl orchestrator-cli exec:java "-Dexec.args=demo"
+```
+For the 5-minute manual walkthrough of the dashboard, see [docs/demo.md](docs/demo.md).
+
 To run both services, the dashboard and live mode, see **[docs/setup.md](docs/setup.md)**. The
 shortener runs on port **8085** and the orchestrator on port **8086**.
 
@@ -44,6 +52,7 @@ shortener runs on port **8085** and the orchestrator on port **8086**.
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | Components, the orchestration model, control-flow diagrams, data model, decisions |
 | [docs/setup.md](docs/setup.md) | Prerequisites, environment, running everything, live and record mode, troubleshooting |
+| [docs/demo.md](docs/demo.md) | The automatic demo and a 5-minute manual walkthrough of the dashboard |
 | [docs/testing.md](docs/testing.md) | The test pyramid, end-to-end and chaos tests, latency results, coverage |
 | [docs/security.md](docs/security.md) | OWASP and LLM-specific review, mitigations, residual risks |
 | [docs/final-summary.md](docs/final-summary.md) | What was built, the evidence, trade-offs, limitations, future work |

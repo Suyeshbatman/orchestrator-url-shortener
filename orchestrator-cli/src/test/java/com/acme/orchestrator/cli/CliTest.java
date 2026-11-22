@@ -219,5 +219,11 @@ class CliTest {
     }
     assertThatThrownBy(() -> ScenarioRunner.bareCopy(repo, tmp.resolve("r2.git"), "nope"))
         .hasMessageContaining("no commit nope");
+
+    // the demo moves main back before each scenario (the previous one published into it)
+    Demo.resetMain(tmp.resolve("remote.git"), first);
+    try (Git bare = Git.open(tmp.resolve("remote.git").toFile())) {
+      assertThat(bare.getRepository().resolve("refs/heads/main").getName()).isEqualTo(first);
+    }
   }
 }

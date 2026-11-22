@@ -1,11 +1,14 @@
 package com.acme.orchestrator.cli;
 
 import com.acme.orchestrator.cli.ScenarioRunner.LlmMode;
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /** Entry point for the demo/operator CLI. */
 public final class Main {
@@ -15,6 +18,10 @@ public final class Main {
       Usage: orchestrator-cli <command> [args]
 
       Commands:
+        demo [--url http://localhost:8086] [--timeout 20m]
+                               The end-to-end demo in replay mode, no API key: docker compose up,
+                               the orchestrator app on a fresh database, the three scenarios
+                               through its API with scripted humans, audit checks, metrics.
         run-scenario <id> [--llm replay|record|handwritten|live] [--timeout 60m]
                                Run one scenario end to end in this process (scripted humans,
                                real agents, real Git and Maven). Default --llm replay.
@@ -23,10 +30,12 @@ public final class Main {
                                  handwritten  only replies/<Agent>-<n>.json, no API key; a missing
                                               reply's prompt is written to replies/pending/
         record-fixtures <id>   Same as run-scenario <id> --llm handwritten
-        demo                   Run all three scenarios end-to-end (replay mode)   [Step 9.2]
-        verify-audit <runId>   Verify a run's hash-chained audit log               [Step 9.2]
-        metrics                Print the reliability metrics summary               [Step 9.2]
+        verify-audit <runId> --key <api key> [--url http://localhost:8086]
+                               Recompute a run's hash chain on a running orchestrator
+        metrics --key <api key> [--url http://localhost:8086]
+                               Print the reliability metrics summary of a running orchestrator
       """;
+  private static final String DEFAULT_URL = "http://localhost:8086";
 
   private Main() {}
 
@@ -49,18 +58,54 @@ public final class Main {
             args.getFirst().equals("record-fixtures")
                 ? LlmMode.HANDWRITTEN
                 : LlmMode.valueOf(option(args, "--llm", "replay").toUpperCase(Locale.ROOT));
-        Duration timeout =
-            Duration.parse("PT" + option(args, "--timeout", "60m").toUpperCase(Locale.ROOT));
-        Environment env = Environment.discover(Path.of(""), System.getenv());
         ScenarioRunner.Outcome outcome =
-            new ScenarioRunner(env, System.out).run(args.get(1), mode, timeout);
+            new ScenarioRunner(environment(), System.out)
+                .run(args.get(1), mode, duration(option(args, "--timeout", "60m")));
         return outcome.expected() && outcome.audit().valid() ? 0 : 1;
+      }
+      case "demo" -> {
+        return new Demo(environment(), System.out, URI.create(option(args, "--url", DEFAULT_URL)))
+            .run(duration(option(args, "--timeout", "20m")));
+      }
+      case "verify-audit" -> {
+        if (args.size() < 2 || option(args, "--key", null) == null) {
+          System.out.print(USAGE);
+          return 2;
+        }
+        JsonNode audit = api(args).get("/api/runs/" + args.get(1) + "/audit/verify");
+        System.out.println(pretty(audit));
+        return audit.path("valid").asBoolean() ? 0 : 1;
+      }
+      case "metrics" -> {
+        if (option(args, "--key", null) == null) {
+          System.out.print(USAGE);
+          return 2;
+        }
+        System.out.println(pretty(api(args).get("/api/metrics/summary")));
+        return 0;
       }
       default -> {
         System.out.print(USAGE);
         return 2;
       }
     }
+  }
+
+  private static Environment environment() {
+    return Environment.discover(Path.of(""), System.getenv());
+  }
+
+  private static OrchestratorApi api(List<String> args) {
+    return new OrchestratorApi(
+        URI.create(option(args, "--url", DEFAULT_URL)), option(args, "--key", null));
+  }
+
+  private static Duration duration(String text) {
+    return Duration.parse("PT" + text.toUpperCase(Locale.ROOT));
+  }
+
+  private static String pretty(JsonNode node) {
+    return JsonMapper.builder().build().writerWithDefaultPrettyPrinter().writeValueAsString(node);
   }
 
   private static String option(List<String> args, String name, String fallback) {
