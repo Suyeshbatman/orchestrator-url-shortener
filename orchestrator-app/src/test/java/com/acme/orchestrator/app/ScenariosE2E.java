@@ -158,6 +158,10 @@ class ScenariosE2E {
     JsonNode audit = call(get("/api/runs/" + runId + "/audit/verify"), OPERATOR, 200);
     assertThat(audit.path("valid").asBoolean()).as("the hash chain verifies").isTrue();
     JsonNode metrics = call(get("/api/metrics/summary"), OPERATOR, 200);
+    // the numbers docs/final-summary.md quotes: the summary after each scenario, the last over all
+    Path report = Path.of("target", "e2e", "metrics-summary.json");
+    Files.createDirectories(report.getParent());
+    Files.writeString(report, JSON.writerWithDefaultPrettyPrinter().writeValueAsString(metrics));
     assertThat(metrics.path("runs").path("completed").asLong()).isPositive();
     assertThat(metrics.path("stages").path("succeeded").asLong()).isPositive();
     assertThat(metrics.path("endToEnd").path("runs").asLong()).isPositive();

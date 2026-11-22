@@ -9,7 +9,7 @@ Run these in the repository root. Docker Desktop must be running.
 stale failures from the earlier run would fail the new one.
 
 ## The pyramid
-| Layer | What | Where |
+| Layer | What it proves | Where |
 |---|---|---|
 | Unit | services, engine, agents, gates, policies, parsers (JUnit 5, AssertJ, Mockito where a port is faked) | every module, `*Test` |
 | Property | Base62/Feistel bijection, DAG ordering (jqwik) | `Base62Test`, `FeistelPermutationTest`, `orchestrator-core` DAG tests |
