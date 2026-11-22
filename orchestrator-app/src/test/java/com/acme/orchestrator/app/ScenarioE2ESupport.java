@@ -92,7 +92,9 @@ abstract class ScenarioE2ESupport {
               "APPROVAL_GRANTED",
               "RUN_COMPLETED"),
           "ambiguous-abuse",
-          List.of("REPLAN_TRIGGERED", "STAGE_INVALIDATED", "APPROVAL_GRANTED", "RUN_COMPLETED"));
+          List.of("REPLAN_TRIGGERED", "STAGE_INVALIDATED", "APPROVAL_GRANTED", "RUN_COMPLETED"),
+          "greenfield-fanout-notes",
+          List.of("STAGE_EXPANDED", "APPROVAL_GRANTED", "RUN_COMPLETED"));
 
   /** Runs the scenario through the API, plays its humans, checks the outcome; the metrics JSON. */
   JsonNode runEndToEnd(String id) throws Exception {
@@ -106,7 +108,8 @@ abstract class ScenarioE2ESupport {
                             Map.of(
                                 "scenarioId", id,
                                 "mode", scenario.mode().name(),
-                                "autonomyLevel", scenario.autonomy().name()))),
+                                "autonomyLevel", scenario.autonomy().name(),
+                                "workflow", scenario.workflow()))),
                 OPERATOR,
                 201)
             .path("run")
@@ -153,10 +156,42 @@ abstract class ScenarioE2ESupport {
       assertThat(types.stream().filter("REPLAN_TRIGGERED"::equals))
           .hasSize(2); // answers, amendment
     }
+    if (id.equals("greenfield-fanout-notes")) {
+      assertFanOut(call(get("/api/runs/" + runId + "/events"), OPERATOR, 200));
+    }
     JsonNode audit = call(get("/api/runs/" + runId + "/audit/verify"), OPERATOR, 200);
     assertThat(audit.path("valid").asBoolean()).as("the hash chain verifies").isTrue();
     JsonNode metrics = call(get("/api/metrics/summary"), OPERATOR, 200);
     return metrics;
+  }
+
+  /**
+   * The implementation ran as three tasks: T1 and T2 at the same time, T3 only after both (T1 is
+   * its declared dependency, T2 shares openapi.yaml with it).
+   */
+  private static void assertFanOut(JsonNode events) {
+    Map<String, Long> started = new HashMap<>();
+    Map<String, Long> succeeded = new HashMap<>();
+    events.forEach(e -> {
+      String stage = e.path("stageId").asString("");
+      long seq = e.path("seq").asLong();
+      switch (e.path("type").asString()) {
+        case "STAGE_STARTED" -> started.putIfAbsent(stage, seq);
+        // an approved stage succeeds with the approval (T1's migration needs one)
+        case "STAGE_SUCCEEDED", "APPROVAL_GRANTED" -> succeeded.put(stage, seq);
+        default -> {}
+      }
+    });
+    assertThat(started)
+        .containsKeys("implementation.T1", "implementation.T2", "implementation.T3")
+        .doesNotContainKey("implementation");
+    assertThat(started.get("implementation.T2"))
+        .as("T2 starts while T1 is still running")
+        .isLessThan(succeeded.get("implementation.T1"));
+    assertThat(started.get("implementation.T3"))
+        .as("T3 waits for T1 and T2")
+        .isGreaterThan(succeeded.get("implementation.T1"))
+        .isGreaterThan(succeeded.get("implementation.T2"));
   }
 
   /** Plays the scenario's humans over the API: answers, approvals, rejections, the amendment. */

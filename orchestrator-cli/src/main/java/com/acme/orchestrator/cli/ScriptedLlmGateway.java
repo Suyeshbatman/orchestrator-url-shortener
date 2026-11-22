@@ -22,7 +22,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * the run stops.
  *
  * <p>Calls of one agent are sequential (an agent's stage runs one attempt at a time), so the
- * numbering is the same on every run.
+ * numbering is the same on every run. The tasks of a fanned-out stage run in parallel, so they are
+ * numbered per task: {@code replies/<Agent>-<task>-<n>.json}, e.g. {@code
+ * ImplementationAgent-T2-1.json}.
  */
 public final class ScriptedLlmGateway implements LlmGateway {
 
@@ -37,8 +39,9 @@ public final class ScriptedLlmGateway implements LlmGateway {
 
   @Override
   public LlmResponse complete(LlmRequest request) {
-    int n = calls.merge(request.agent(), 1, Integer::sum);
-    String name = request.agent() + "-" + n;
+    String caller = request.agent() + request.task().map(t -> "-" + t).orElse("");
+    int n = calls.merge(caller, 1, Integer::sum);
+    String name = caller + "-" + n;
     Path reply = repliesDir.resolve(name + ".json");
     if (Files.isRegularFile(reply)) {
       return new LlmResponse(

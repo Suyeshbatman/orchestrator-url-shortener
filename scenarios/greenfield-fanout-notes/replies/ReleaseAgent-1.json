@@ -1,0 +1,45 @@
+{
+  "checklist": [
+    {
+      "item": "Tests green",
+      "status": "DONE",
+      "evidence": "validation_report: build SUCCESS, 278 tests, 0 failed, 0 errors"
+    },
+    {
+      "item": "Coverage at or above the gate (80 %)",
+      "status": "DONE",
+      "evidence": "validation_report: line coverage 0.95"
+    },
+    {
+      "item": "Policy scan clean",
+      "status": "DONE",
+      "evidence": "policy REQUIRE_APPROVAL only for CHG-001-schema-migration (V3__link_note.sql), approved by a human; no DENY"
+    },
+    {
+      "item": "Migration is backward compatible",
+      "status": "DONE",
+      "evidence": "V3 adds a nullable column without a default: catalog-only in PostgreSQL, the previous version keeps working"
+    },
+    {
+      "item": "Docs updated",
+      "status": "DONE",
+      "evidence": "docs/api/link-notes-and-csv.md (final, with the validation results)"
+    }
+  ],
+  "changelog": "New: links take an optional note (at most 280 characters) on create, returned with the link on create and get; longer notes get 400 validation-failed. New: GET /api/v1/links/{code}/stats.csv exports a link's daily clicks as CSV (day,clicks, zero-filled), with the same range rules, errors and owner check as the JSON stats. Schema: Flyway V3 adds the nullable link.note column.",
+  "riskRegister": [
+    {
+      "risk": "The migration runs against a busy link table",
+      "mitigation": "ADD COLUMN without a default changes only the catalog in PostgreSQL; no rewrite, a brief lock."
+    },
+    {
+      "risk": "Strict clients reject the new note field in link responses",
+      "mitigation": "Additive field, documented in the API note."
+    }
+  ],
+  "rollbackPlan": "Revert the merge commit on main and redeploy. The note column can stay: the previous version ignores it. Drop it with a later migration only once no rollback is expected.",
+  "openIssues": [
+    "BF-1 (redirect cache not evicted on delete) is unchanged and out of scope."
+  ],
+  "finalEngineeringSummary": "## Link notes and the clicks CSV\n\n**What changed.**\n- Links carry an optional `note` (at most 280 characters, bean-validated), stored by `LinkService` on generated and alias links and returned in `LinkResponse`. Flyway `V3__link_note.sql` adds the nullable column.\n- `GET /api/v1/links/{code}/stats.csv` renders `StatsService.stats` with the new `StatsCsv` as a `text/csv` attachment, so ranges, errors and the owner check are those of the JSON stats.\n\n**How it was built.** The implementation fanned out into three tasks:\n- T1, the migration, and T2, the CSV export, ran in parallel.\n- T3, the note, ran after T1, its declared dependency, and after T2, because both change `openapi.yaml`.\n- The migration needed a human approval (CHG-001).\n\n**Validation.** The build succeeded with 278 tests, none failed, and 95 % line coverage."
+}

@@ -1,0 +1,63 @@
+{
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Migration: nullable note column on link",
+      "type": "MIGRATION",
+      "requirementIds": ["FR-1", "NFR-1"],
+      "dependsOn": [],
+      "estimatedFiles": ["shortener-service/src/main/resources/db/migration/V3__link_note.sql"],
+      "risk": "MED"
+    },
+    {
+      "id": "T2",
+      "title": "CSV export of daily clicks: GET /api/v1/links/{code}/stats.csv",
+      "type": "CODE",
+      "requirementIds": ["FR-3", "FR-4"],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/analytics/StatsCsv.java",
+        "shortener-service/src/main/java/com/acme/shortener/analytics/StatsController.java",
+        "shortener-service/src/main/resources/static/openapi.yaml"
+      ],
+      "risk": "LOW"
+    },
+    {
+      "id": "T3",
+      "title": "Optional note on create, returned with the link",
+      "type": "CODE",
+      "requirementIds": ["FR-1", "FR-2", "NFR-1", "NFR-2"],
+      "dependsOn": ["T1"],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/link/Link.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/CreateLinkRequest.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkResponse.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkService.java",
+        "shortener-service/src/main/resources/static/openapi.yaml"
+      ],
+      "risk": "MED"
+    },
+    {
+      "id": "T4",
+      "title": "Tests for the note and the CSV export",
+      "type": "TEST",
+      "requirementIds": ["FR-1", "FR-2", "FR-3", "FR-4", "NFR-1", "NFR-2"],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "shortener-service/src/test/java/com/acme/shortener/link/LinkNoteIT.java",
+        "shortener-service/src/test/java/com/acme/shortener/analytics/StatsCsvTest.java",
+        "shortener-service/src/test/java/com/acme/shortener/analytics/StatsCsvIT.java"
+      ],
+      "risk": "LOW"
+    },
+    {
+      "id": "T5",
+      "title": "API notes for the link note and the CSV export",
+      "type": "DOC",
+      "requirementIds": ["FR-2", "FR-3"],
+      "dependsOn": [],
+      "estimatedFiles": ["docs/api/link-notes-and-csv.md"],
+      "risk": "LOW"
+    }
+  ]
+}

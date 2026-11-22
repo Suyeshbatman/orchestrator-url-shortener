@@ -92,7 +92,7 @@ model time. Live calls took 1–15 minutes each for large replies.
 
   All are fixed.
 - **Hand-written fixtures.** The API credit ran out during the 7.1 recordings, so the fixtures for
-  all three scenarios were written by hand against each agent's exact prompt. The code was built and
+  all three scenarios (and the fan-out scenario) were written by hand against each agent's exact prompt. The code was built and
   tested before use. The write-ups say so. Two replies in 7.2 are deliberately bad.
 - **Fixtures are pinned to a commit** (`base: phase-7`). Changing the shortener, a prompt or a schema
   on purpose means re-recording.
@@ -114,8 +114,10 @@ model time. Live calls took 1–15 minutes each for large replies.
   The head hash is not anchored externally.
 - **L-7** Latency figures come from replay runs, without model time. Live calls take minutes each.
 - **L-8** Live calls are non-streaming, so very large replies take many minutes.
-- **L-9** The per-task fan-out is opt-in (`sdlc-fanout.yml`) and has no recorded scenario yet. The
-  three scenarios use `sdlc-standard.yml`, where implementation is one stage over all tasks.
+- **L-9** The per-task fan-out is opt-in (`sdlc-fanout.yml`). Only one scenario uses it
+  ([greenfield-fanout-notes](scenarios/greenfield-fanout-notes.md), hand-written, in `-Pe2e` only).
+  The three Phase 7 scenarios use `sdlc-standard.yml`, where implementation is one stage over all
+  tasks.
   - Tasks that touch the same files are serialised only on their *estimated* files.
   - An unannounced overlap is caught when the file is written, and that task is retried.
 

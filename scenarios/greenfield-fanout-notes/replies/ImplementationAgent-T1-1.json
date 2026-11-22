@@ -1,0 +1,9 @@
+{
+  "summary": "Flyway V3 adds the nullable link.note VARCHAR(280); no default, so PostgreSQL changes only the catalog and the previous version keeps working.",
+  "files": [
+    {
+      "path": "shortener-service/src/main/resources/db/migration/V3__link_note.sql",
+      "newContent": "-- An optional note the owner keeps with a link (plain text, at most 280 characters).\n-- Nullable without a default: a catalog-only change in PostgreSQL, so the table isn't rewritten and\n-- the previous version of the service keeps working against this schema.\nALTER TABLE link ADD COLUMN note VARCHAR(280);\n"
+    }
+  ]
+}

@@ -13,6 +13,8 @@ import java.util.OptionalDouble;
  *
  * @param jsonSchema the JSON Schema the reply must match (its text), if the reply is structured
  * @param temperature sent only when set (the 3.x SDK has no typed setter for it)
+ * @param task the task of a fanned-out stage the call is for; not sent and not part of the replay
+ *     key (the prompt already says which task), it names hand-written replies per task
  */
 public record LlmRequest(
     String agent,
@@ -20,7 +22,8 @@ public record LlmRequest(
     String userPrompt,
     Optional<String> jsonSchema,
     int maxTokens,
-    OptionalDouble temperature) {
+    OptionalDouble temperature,
+    Optional<String> task) {
 
   public LlmRequest {
     Objects.requireNonNull(agent, "agent");
@@ -28,22 +31,29 @@ public record LlmRequest(
     Objects.requireNonNull(userPrompt, "userPrompt");
     jsonSchema = Objects.requireNonNull(jsonSchema, "jsonSchema");
     temperature = Objects.requireNonNull(temperature, "temperature");
+    task = Objects.requireNonNull(task, "task");
     if (maxTokens < 1) {
       throw new IllegalArgumentException("maxTokens must be at least 1");
     }
   }
 
   public static LlmRequest of(String agent, String system, String user, int maxTokens) {
-    return new LlmRequest(agent, system, user, Optional.empty(), maxTokens, OptionalDouble.empty());
+    return new LlmRequest(
+        agent, system, user, Optional.empty(), maxTokens, OptionalDouble.empty(), Optional.empty());
   }
 
   public LlmRequest withSchema(String schema) {
     return new LlmRequest(
-        agent, systemPrompt, userPrompt, Optional.of(schema), maxTokens, temperature);
+        agent, systemPrompt, userPrompt, Optional.of(schema), maxTokens, temperature, task);
   }
 
   public LlmRequest withPrompts(String system, String user) {
-    return new LlmRequest(agent, system, user, jsonSchema, maxTokens, temperature);
+    return new LlmRequest(agent, system, user, jsonSchema, maxTokens, temperature, task);
+  }
+
+  public LlmRequest withTask(Optional<String> taskId) {
+    return new LlmRequest(
+        agent, systemPrompt, userPrompt, jsonSchema, maxTokens, temperature, taskId);
   }
 
   /**

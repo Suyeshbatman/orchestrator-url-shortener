@@ -1,0 +1,118 @@
+{
+  "problemStatement": "Link owners want to record why a link exists and to analyse clicks in a spreadsheet. Links get an optional plain-text note (at most 280 characters), set on create and returned with the link, and the owner can export the daily clicks of a link as CSV with the same range rules and owner check as the JSON stats.",
+  "functional": [
+    {
+      "id": "FR-1",
+      "text": "POST /api/v1/links accepts an optional note (string, at most 280 characters); a longer note is rejected with 400 and a Problem Details body of type /problems/validation-failed.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-2",
+      "text": "The link responses of create (201) and GET /api/v1/links/{code} include note: the stored text, or null when none was given.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-3",
+      "text": "GET /api/v1/links/{code}/stats.csv returns text/csv with a header row day,clicks and one row per UTC day in the range, oldest first, zero-filled.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-4",
+      "text": "The CSV export takes the same optional from/to parameters as GET /api/v1/links/{code}/stats, with the same defaults (last 30 days), maximum (90 days) and errors (400 /problems/invalid-stats-range), and the same owner check (404 /problems/link-not-found for another key's or an unknown link).",
+      "priority": "MUST"
+    }
+  ],
+  "nonFunctional": [
+    {
+      "id": "NFR-1",
+      "text": "Existing clients keep working: note is optional on create, and links created before this change have no note.",
+      "category": "COMPATIBILITY"
+    },
+    {
+      "id": "NFR-2",
+      "text": "The note is returned only to the link's owner through the management API; it never appears on the public redirect.",
+      "category": "PRIVACY"
+    }
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "requirementId": "FR-1",
+      "given": "a valid API key",
+      "when": "POST /api/v1/links with url and note \"spring campaign\"",
+      "then": "201 and the body has note \"spring campaign\""
+    },
+    {
+      "id": "AC-2",
+      "requirementId": "FR-1",
+      "given": "a valid API key",
+      "when": "POST /api/v1/links with a note of 281 characters",
+      "then": "400 application/problem+json with type /problems/validation-failed"
+    },
+    {
+      "id": "AC-3",
+      "requirementId": "FR-2",
+      "given": "a link created with a note",
+      "when": "GET /api/v1/links/{code}",
+      "then": "the body has the same note"
+    },
+    {
+      "id": "AC-4",
+      "requirementId": "NFR-1",
+      "given": "a link created without a note",
+      "when": "GET /api/v1/links/{code}",
+      "then": "the body has note null"
+    },
+    {
+      "id": "AC-5",
+      "requirementId": "FR-3",
+      "given": "a link with 2 clicks on 2026-03-02 and none on 2026-03-01 and 2026-03-03",
+      "when": "GET /api/v1/links/{code}/stats.csv?from=2026-03-01&to=2026-03-03",
+      "then": "200 text/csv with the lines day,clicks / 2026-03-01,0 / 2026-03-02,2 / 2026-03-03,0"
+    },
+    {
+      "id": "AC-6",
+      "requirementId": "FR-4",
+      "given": "a link owned by the caller",
+      "when": "GET /api/v1/links/{code}/stats.csv?from=2026-03-05&to=2026-03-01",
+      "then": "400 with type /problems/invalid-stats-range"
+    },
+    {
+      "id": "AC-7",
+      "requirementId": "FR-4",
+      "given": "a link owned by another API key",
+      "when": "GET /api/v1/links/{code}/stats.csv",
+      "then": "404 with type /problems/link-not-found"
+    },
+    {
+      "id": "AC-8",
+      "requirementId": "NFR-2",
+      "given": "a link with a note",
+      "when": "GET /{code} (the redirect)",
+      "then": "302 to the original URL and the note is not in the response"
+    }
+  ],
+  "assumptions": [
+    "The note is stored as given (no trimming); an empty note is stored as an empty string.",
+    "The CSV has no other columns: unique visitors, referrers and user agents stay in the JSON stats.",
+    "Notes cannot be changed after creation; there is no update endpoint for links today."
+  ],
+  "ambiguities": [
+    {
+      "id": "AMB-1",
+      "question": "Should the CSV be offered as a download (Content-Disposition attachment)?",
+      "options": [
+        "inline text/csv",
+        "attachment with a file name"
+      ],
+      "severity": "NONBLOCKING",
+      "proposedDefault": "attachment named <code>-clicks.csv, so browsers save it for the spreadsheet"
+    }
+  ],
+  "outOfScope": [
+    "Editing or deleting a note",
+    "Searching links by note",
+    "Fixing the stale redirect cache after delete (known issue BF-1)"
+  ],
+  "classification": "GREENFIELD"
+}

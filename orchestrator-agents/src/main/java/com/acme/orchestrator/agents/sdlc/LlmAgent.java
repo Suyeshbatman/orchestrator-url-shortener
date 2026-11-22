@@ -59,7 +59,14 @@ abstract class LlmAgent implements Agent {
     values.put("feedback", bullets(ctx.feedback(), "None (first attempt)."));
     Prompt prompt = kit.prompts().render(name, values);
     LlmClient.Structured out =
-        kit.llm().completeJson(UsageMeter.of(ctx), name, prompt, outputType, maxTokens);
+        kit.llm()
+            .completeJson(
+                UsageMeter.of(ctx),
+                name,
+                ctx.task().map(t -> t.id()),
+                prompt,
+                outputType,
+                maxTokens);
     check(ctx, out.json());
     after(ctx, out.json());
     return AgentResult.success(

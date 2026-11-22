@@ -62,7 +62,7 @@ shortener runs on port **8085** and the orchestrator on port **8086**.
 | [docs/testing.md](docs/testing.md) | The test pyramid, end-to-end and chaos tests, latency results, coverage |
 | [docs/security.md](docs/security.md) | OWASP and LLM-specific review, mitigations, residual risks |
 | [docs/final-summary.md](docs/final-summary.md) | What was built, the evidence, trade-offs, limitations, future work |
-| [docs/scenarios/](docs/scenarios/) | The three scenario write-ups |
+| [docs/scenarios/](docs/scenarios/) | The scenario write-ups: the three Phase 7 scenarios and the fan-out scenario |
 | [docs/adr/](docs/adr/) | Architecture decision records 0001–0009 |
 | [docs/known-issues.md](docs/known-issues.md) | BF-1, the seeded defect the brownfield scenario fixes |
 | [docs/plan/](docs/plan/) | The build plan and the design rationale |

@@ -3,6 +3,16 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+### Added
+- **Fan-out scenario** `greenfield-fanout-notes` (`workflow: sdlc-fanout`). It adds link notes and
+  a clicks CSV export, split into three tasks: T1 and T2 run in parallel, then T3. Its fixtures are
+  hand-written. It runs in `ScenariosE2E`, not in the demo. See
+  [docs/scenarios/greenfield-fanout-notes.md](docs/scenarios/greenfield-fanout-notes.md).
+- Hand-written replies for a fanned-out task are numbered per task
+  (`replies/ImplementationAgent-T1-1.json`). `LlmRequest` carries the task, but not in the replay
+  key.
+
 ## [1.2.0] — 2026-11-22
 ### Added
 - **Task fan-out**, opt-in with the new `config/workflows/sdlc-fanout.yml`. A stage marked

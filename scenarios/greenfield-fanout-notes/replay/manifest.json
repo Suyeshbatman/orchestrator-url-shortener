@@ -1,0 +1,1 @@
+{"baseCommit":"a0288ede1d34e74d2dafb6396232967bf91e55c0","model":"claude-sonnet-5-5","note":"Fixtures are keyed by the exact prompt. They stay valid while the prompts, schemas and the shortener-service code at the base commit stay the same.","recordedWith":"handwritten","scenario":"greenfield-fanout-notes"}

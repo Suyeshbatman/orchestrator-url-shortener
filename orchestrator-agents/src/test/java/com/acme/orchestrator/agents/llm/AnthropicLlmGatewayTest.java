@@ -170,7 +170,14 @@ class AnthropicLlmGatewayTest {
   void aTemperatureIsSentWhenSet() {
     script.add(new Reply(200, message("claude-sonnet-5-5", "ok")));
     LlmRequest warm =
-        new LlmRequest("A", "s", "u", Optional.empty(), 10, java.util.OptionalDouble.of(0.3));
+        new LlmRequest(
+            "A",
+            "s",
+            "u",
+            Optional.empty(),
+            10,
+            java.util.OptionalDouble.of(0.3),
+            Optional.empty());
 
     gateway(Optional.empty()).complete(warm);
 

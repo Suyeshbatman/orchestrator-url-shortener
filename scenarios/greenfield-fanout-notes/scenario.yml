@@ -1,0 +1,10 @@
+# Fan-out scenario: the implementation runs as one sub-stage per code task (sdlc-fanout).
+# Shows: T1 (migration) and T2 (CSV export) run in parallel; T3 (note) waits for T1 (its declared
+# dependency) and for T2 (both change openapi.yaml, so they are chained).
+mode: GREENFIELD
+autonomy: L1_SUPERVISED
+base: phase-7                   # the shortener-service code the fixtures were written against
+workflow: sdlc-fanout
+expect: COMPLETED
+# Every approval is granted by the scripted approver (alice).
+decisions: []

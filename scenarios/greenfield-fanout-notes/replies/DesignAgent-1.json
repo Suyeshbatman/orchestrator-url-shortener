@@ -1,0 +1,52 @@
+{
+  "approach": "Two independent changes. (1) Note: Flyway V3 adds a nullable link.note VARCHAR(280). Link gets a note component (null for older links) and a withNote wither; CreateLinkRequest gets an optional note with @Size(max = 280), so a longer note fails bean validation (400 validation-failed) before the service runs. LinkService.create stores it on both the generated and the alias path, and LinkResponse carries it. The redirect path (cache entries hold only the original URL) is untouched, so the note never leaves the management API. (2) CSV: StatsController gets GET /api/v1/links/{code}/stats.csv producing text/csv. It calls the existing StatsService.stats, so range defaults, limits, errors and the owner check are exactly those of the JSON stats, and renders clicksByDay with a small pure StatsCsv formatter. The response is an attachment named <code>-clicks.csv.",
+  "alternativesConsidered": [
+    {
+      "option": "A separate CSV query in ClickStatsRepository",
+      "whyNot": "It would duplicate the range rules and owner check; StatsService.stats already returns the zero-filled days."
+    },
+    {
+      "option": "Validate the note length in LinkService",
+      "whyNot": "Bean validation on the request already maps to /problems/validation-failed, the same as other malformed fields."
+    },
+    {
+      "option": "A content-negotiated /stats (Accept: text/csv)",
+      "whyNot": "A distinct .csv URL is easier to paste into a spreadsheet and needs no header."
+    }
+  ],
+  "apiChanges": "paths:\n  /api/v1/links:\n    post:\n      requestBody: CreateLinkRequest gains note: { type: [string, 'null'], maxLength: 280 }\n  /api/v1/links/{code}/stats.csv:\n    get:\n      summary: Daily clicks of a link as CSV\n      parameters: [code (path), from (query, date), to (query, date)]\n      responses:\n        '200': { description: 'day,clicks rows', content: { text/csv: {} } }\n        '400': { description: invalid range (type /problems/invalid-stats-range) }\n        '404': { description: unknown or another key's link (type /problems/link-not-found) }\ncomponents:\n  schemas:\n    LinkResponse: gains note: { type: [string, 'null'] }\n",
+  "schemaChanges": "ALTER TABLE link ADD COLUMN note VARCHAR(280); -- nullable, no default: existing rows get NULL, no rewrite of the table",
+  "components": [
+    {
+      "name": "db/migration/V3__link_note.sql",
+      "responsibility": "Adds the nullable note column; additive, safe to run while the old version serves traffic."
+    },
+    {
+      "name": "com.acme.shortener.link (Link, CreateLinkRequest, LinkResponse, LinkService)",
+      "responsibility": "Carry the optional note from the request to the row and back to the response."
+    },
+    {
+      "name": "com.acme.shortener.analytics.StatsCsv",
+      "responsibility": "Renders LinkStats.clicksByDay as day,clicks lines (LF line endings, ISO dates)."
+    },
+    {
+      "name": "com.acme.shortener.analytics.StatsController",
+      "responsibility": "New GET /api/v1/links/{code}/stats.csv next to the JSON stats, same parameters, text/csv attachment."
+    }
+  ],
+  "risks": [
+    {
+      "risk": "The migration locks the link table",
+      "likelihood": "LOW",
+      "impact": "MED",
+      "mitigation": "ADD COLUMN without a default is a catalog-only change in PostgreSQL; no table rewrite."
+    },
+    {
+      "risk": "Clients that reject unknown fields break on the new note field",
+      "likelihood": "LOW",
+      "impact": "LOW",
+      "mitigation": "Additive JSON field, documented in the API notes; the service's own clients ignore unknown fields."
+    }
+  ],
+  "rolloutPlan": "Deploy the migration with the code (Flyway at start-up; the column is nullable, so the previous version keeps working against the new schema). No feature flag: both changes are additive. Rollback: revert the code; the unused column can stay."
+}

@@ -36,7 +36,8 @@ class RecordReplayTest {
                     "Add QR codes.",
                     REQUEST.jsonSchema(),
                     50,
-                    java.util.OptionalDouble.of(0.2))
+                    java.util.OptionalDouble.of(0.2),
+                    Optional.of("T1")) // neither sampling nor the task is part of the key
                 .hash());
     assertThat(REQUEST.withPrompts("You write specs.", "Add QR codes!").hash())
         .isNotEqualTo(REQUEST.hash());

@@ -130,6 +130,21 @@ class CliTest {
         .contains("## JSON Schema");
   }
 
+  @Test
+  void theTasksOfAFanOutAreNumberedSeparately() throws Exception {
+    Path replies = Files.createDirectories(tmp.resolve("replies"));
+    Files.writeString(replies.resolve("ImplementationAgent-T1-1.json"), "{\"t\":1}");
+    Files.writeString(replies.resolve("ImplementationAgent-T2-1.json"), "{\"t\":2}");
+    var gateway = new ScriptedLlmGateway(replies, Optional.empty());
+    LlmRequest impl = LlmRequest.of("ImplementationAgent", "s", "u", 10);
+
+    // whichever task calls first gets its own reply
+    assertThat(gateway.complete(impl.withTask(Optional.of("T2"))).text()).isEqualTo("{\"t\":2}");
+    assertThat(gateway.complete(impl.withTask(Optional.of("T1"))).text()).isEqualTo("{\"t\":1}");
+    assertThatThrownBy(() -> gateway.complete(impl.withTask(Optional.of("T1"))))
+        .hasMessageContaining("no hand-written reply ImplementationAgent-T1-2.json");
+  }
+
   // ---- the scripted human ---------------------------------------------------------------------
 
   @Test

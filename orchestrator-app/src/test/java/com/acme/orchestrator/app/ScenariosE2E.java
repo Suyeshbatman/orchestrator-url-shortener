@@ -11,9 +11,9 @@ import org.springframework.context.annotation.Import;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The three Phase 7 scenarios end to end through the API on PostgreSQL (see {@link
- * ScenarioE2ESupport}); validation builds run on this machine (replayed fixtures are reviewed
- * code). Runs only with {@code -Pe2e}.
+ * The three Phase 7 scenarios and the fan-out scenario end to end through the API on PostgreSQL
+ * (see {@link ScenarioE2ESupport}); validation builds run on this machine (replayed fixtures are
+ * reviewed code). Runs only with {@code -Pe2e}.
  */
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(properties = "orchestrator.recover-on-startup=false")
@@ -22,7 +22,13 @@ import tools.jackson.databind.JsonNode;
 class ScenariosE2E extends ScenarioE2ESupport {
 
   @ParameterizedTest
-  @ValueSource(strings = {"greenfield-qr-code", "brownfield-expiry-bf1", "ambiguous-abuse"})
+  @ValueSource(
+      strings = {
+        "greenfield-qr-code",
+        "brownfield-expiry-bf1",
+        "ambiguous-abuse",
+        "greenfield-fanout-notes"
+      })
   void theScenarioRunsEndToEnd(String id) throws Exception {
     JsonNode metrics = runEndToEnd(id);
     // the numbers docs/final-summary.md quotes: the summary after each scenario, the last over all

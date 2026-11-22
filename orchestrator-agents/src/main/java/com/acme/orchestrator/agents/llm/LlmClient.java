@@ -4,6 +4,7 @@ import com.acme.orchestrator.agents.llm.PromptTemplates.Prompt;
 import com.acme.orchestrator.core.engine.AgentValidationException;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import tools.jackson.core.JacksonException;
@@ -49,9 +50,21 @@ public final class LlmClient {
    */
   public Structured completeJson(
       UsageMeter meter, String agent, Prompt prompt, String artifactType, int maxTokens) {
+    return completeJson(meter, agent, Optional.empty(), prompt, artifactType, maxTokens);
+  }
+
+  /** As above, for {@code task} of a fanned-out stage. */
+  public Structured completeJson(
+      UsageMeter meter,
+      String agent,
+      Optional<String> task,
+      Prompt prompt,
+      String artifactType,
+      int maxTokens) {
     LlmRequest request =
         LlmRequest.of(agent, prompt.system(), prompt.user(), maxTokens)
-            .withSchema(schemas.text(artifactType));
+            .withSchema(schemas.text(artifactType))
+            .withTask(task);
     LlmResponse first = complete(meter, request);
     List<String> problems = problems(first.text(), artifactType);
     if (problems.isEmpty()) {
