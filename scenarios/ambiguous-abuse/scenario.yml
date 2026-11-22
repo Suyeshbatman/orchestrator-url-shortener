@@ -1,0 +1,12 @@
+# Scenario 7.3 — ambiguous: "make the shortener safer".
+# Shows: blocking questions stop the run (AWAITING_HUMAN) until answers.json answers them (spec v2);
+# a mid-run amendment once the design is approved re-plans the run: the requirements re-run
+# (spec v3), the design approval is voided and everything downstream re-executes.
+mode: BROWNFIELD
+autonomy: L1_SUPERVISED
+base: main
+expect: COMPLETED
+decisions: []
+amend:
+  afterApprovalOf: design
+  text: "Make the shortener safer — people are abusing it. Also block URL shorteners chaining to other shorteners."

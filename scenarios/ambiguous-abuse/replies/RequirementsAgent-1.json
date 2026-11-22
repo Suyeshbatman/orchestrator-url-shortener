@@ -1,0 +1,86 @@
+{
+  "problemStatement": "The shortener is being abused, but the requirement does not say how: harmful destinations, request flooding and spam accounts need different defences, so the kind of abuse and the response to it must be decided before anything is built.",
+  "functional": [
+    {
+      "id": "FR-1",
+      "text": "Links to known-harmful destinations can no longer be created.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-2",
+      "text": "Abusive links that already exist can be stopped from redirecting.",
+      "priority": "MUST"
+    }
+  ],
+  "nonFunctional": [
+    {
+      "id": "NFR-1",
+      "text": "The redirect path keeps its latency targets.",
+      "category": "PERFORMANCE"
+    }
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "requirementId": "FR-1",
+      "given": "a destination known to be harmful",
+      "when": "a link to it is created",
+      "then": "the request is refused"
+    },
+    {
+      "id": "AC-2",
+      "requirementId": "FR-2",
+      "given": "an existing abusive link",
+      "when": "it is stopped",
+      "then": "it no longer redirects"
+    }
+  ],
+  "assumptions": [
+    "Request flooding is already handled by the existing rate limiter (create and redirect limits)."
+  ],
+  "ambiguities": [
+    {
+      "id": "AMB-1",
+      "question": "Which abuse matters most: malicious destination URLs (phishing, malware), request flooding, or spam accounts creating links?",
+      "options": [
+        "malicious destinations",
+        "request flooding",
+        "spam accounts"
+      ],
+      "severity": "BLOCKING",
+      "proposedDefault": ""
+    },
+    {
+      "id": "AMB-2",
+      "question": "What should happen to a harmful link: block it outright, or flag it for review and keep it working?",
+      "options": [
+        "block",
+        "flag for review"
+      ],
+      "severity": "BLOCKING",
+      "proposedDefault": ""
+    },
+    {
+      "id": "AMB-3",
+      "question": "Where do the threat lists come from: an external reputation API (for example Google Safe Browsing) or lists we maintain?",
+      "options": [
+        "external API",
+        "our own list"
+      ],
+      "severity": "BLOCKING",
+      "proposedDefault": ""
+    },
+    {
+      "id": "AMB-4",
+      "question": "Are existing links rescanned when the rules change?",
+      "options": [
+        "yes, a background rescan",
+        "no, only new links are checked"
+      ],
+      "severity": "BLOCKING",
+      "proposedDefault": ""
+    }
+  ],
+  "outOfScope": [],
+  "classification": "BROWNFIELD"
+}

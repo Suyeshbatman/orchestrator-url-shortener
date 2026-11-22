@@ -1,0 +1,20 @@
+{
+  "answers": [
+    {
+      "ambiguityId": "AMB-1",
+      "answer": "Malicious destination URLs. Flooding is covered by the rate limiter; spam accounts are out of scope."
+    },
+    {
+      "ambiguityId": "AMB-2",
+      "answer": "Block at creation for domains on our blocklist. For existing links, an admin can flag a link; a flagged link answers 451 instead of redirecting."
+    },
+    {
+      "ambiguityId": "AMB-3",
+      "answer": "No external API: a domain blocklist in configuration, matched with all subdomains."
+    },
+    {
+      "ambiguityId": "AMB-4",
+      "answer": "No rescan. Admin flagging handles links that already exist."
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "approach": "Destination rules live in UrlValidator, which every create already calls: after the self-reference check, the host (lower-cased, trailing dot removed) and each of its parent domains are looked up in the configured blocked domains and other URL shorteners sets, so www.evil.test matches evil.test but notevil.test does not. Refusals are InvalidUrlException with reason BLOCKED_DOMAIN or URL_SHORTENER (400 invalid-url, as today). Moderation: a new abuse package with AdminController (POST /api/v1/admin/links/{code}/flag, behind the existing API key interceptor; only keys named in shortener.abuse.admin-keys, else NotAdminException: 403 forbidden). LinkService.flag sets the new status FLAGGED (Flyway V3 widens the check constraint) and evicts the cache after commit; resolve answers 451 link-unavailable for a flagged row and never caches it.",
+  "alternativesConsidered": [
+    {
+      "option": "An external reputation API (Safe Browsing)",
+      "whyNot": "Ruled out in the answers: no external dependency on the create path."
+    },
+    {
+      "option": "A blocklist table with an admin API",
+      "whyNot": "More than needed now; configuration is reviewed and deployed like code. Can come later."
+    },
+    {
+      "option": "Delete abusive links instead of flagging",
+      "whyNot": "Deletion is the owner's action and answers 404; 451 tells clients why, and keeps the evidence."
+    },
+    {
+      "option": "Resolve shortener links and check their final destination",
+      "whyNot": "Needs outbound requests at create time (SSRF surface, latency) and the target can change later; refusing chains is simpler and safer."
+    }
+  ],
+  "apiChanges": "paths:\n  /api/v1/links:\n    post:\n      responses:\n        '400': { description: 'invalid-url, reason BLOCKED_DOMAIN or URL_SHORTENER (new)' }\n  /api/v1/admin/links/{code}/flag:\n    post:\n      security: [ { apiKey: [] } ]\n      responses:\n        '204': { description: flagged (idempotent) }\n        '401': { description: unauthorized }\n        '403': { description: forbidden (not an admin key) }\n        '404': { description: link-not-found (unknown or deleted) }\n  /{code}:\n    get:\n      responses:\n        '451': { description: link-unavailable (flagged by an admin) }\n",
+  "schemaChanges": "ALTER TABLE link DROP CONSTRAINT link_status_check;\nALTER TABLE link ADD CONSTRAINT link_status_check CHECK (status IN ('ACTIVE', 'DELETED', 'FLAGGED'));",
+  "components": [
+    {
+      "name": "abuse.AbuseProperties",
+      "responsibility": "shortener.abuse.blocked-domains (Set<String>, default empty), shortener.abuse.shortener-domains (Set<String>, default bit.ly, tinyurl.com, t.co, goo.gl, ow.ly, is.gd, buff.ly, rebrand.ly, cutt.ly, shorturl.at), shortener.abuse.admin-keys (Set<String> of API key names, default empty). The application starts with the defaults."
+    },
+    {
+      "name": "url.UrlValidator",
+      "responsibility": "The blocked domains and other URL shorteners checks; the existing five-argument constructor stays (no rules)."
+    },
+    {
+      "name": "abuse.AdminController / NotAdminException",
+      "responsibility": "The flag endpoint and its 403."
+    },
+    {
+      "name": "link.LinkService / Link / LinkStatus",
+      "responsibility": "flag(code): FLAGGED and cache eviction after commit; resolve throws LinkUnavailableException (451) for FLAGGED."
+    },
+    {
+      "name": "V3__link_flagged.sql",
+      "responsibility": "Allows status FLAGGED."
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Constraint change on the link table",
+      "likelihood": "LOW",
+      "impact": "HIGH",
+      "mitigation": "Small table; the new constraint is a superset of the old one, so every existing row passes."
+    },
+    {
+      "risk": "A flagged link is served from a cache",
+      "likelihood": "MED",
+      "impact": "MED",
+      "mitigation": "Evict after commit; the 451 is never cached; other instances' L1 bounded by its 5-minute TTL (documented)."
+    },
+    {
+      "risk": "A blocklist entry is too broad",
+      "likelihood": "LOW",
+      "impact": "MED",
+      "mitigation": "Exact domain-or-subdomain matching only, never substrings; the list is reviewed like code."
+    }
+  ],
+  "rolloutPlan": "Migration V3 runs on startup. Ship with an empty blocklist and no admin keys, then set shortener.abuse.blocked-domains and shortener.abuse.admin-keys per environment; the shortener list is on by default. Rollback: redeploy the previous version after unflagging any FLAGGED rows (the old constraint rejects them)."
+}

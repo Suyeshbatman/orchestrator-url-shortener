@@ -1,0 +1,97 @@
+{
+  "modules": [
+    "shortener-service"
+  ],
+  "files": [
+    {
+      "path": "shortener-service/src/main/resources/db/migration/V3__link_flagged.sql",
+      "changeType": "ADD",
+      "reason": "widen the status check constraint to FLAGGED"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/abuse/AbuseProperties.java",
+      "changeType": "ADD",
+      "reason": "shortener.abuse.* settings: blocked domains, shortener domains, admin key names"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/abuse/AdminController.java",
+      "changeType": "ADD",
+      "reason": "POST /api/v1/admin/links/{code}/flag"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/abuse/NotAdminException.java",
+      "changeType": "ADD",
+      "reason": "403 for non-admin keys"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/url/UrlValidator.java",
+      "changeType": "MODIFY",
+      "reason": "domain rules after the self-reference check; keep the existing constructor for its callers"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/url/InvalidUrlException.java",
+      "changeType": "MODIFY",
+      "reason": "reason BLOCKED_DOMAIN and URL_SHORTENER"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/config/UrlConfig.java",
+      "changeType": "MODIFY",
+      "reason": "pass the rules to the validator"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/config/CodeConfig.java",
+      "changeType": "MODIFY",
+      "reason": "register AbuseProperties"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/link/LinkStatus.java",
+      "changeType": "MODIFY",
+      "reason": "FLAGGED"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/link/Link.java",
+      "changeType": "MODIFY",
+      "reason": "markFlagged"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/link/LinkService.java",
+      "changeType": "MODIFY",
+      "reason": "flag(code), and 451 for a flagged link on resolve"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/link/LinkUnavailableException.java",
+      "changeType": "ADD",
+      "reason": "451"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/api/ProblemTypes.java",
+      "changeType": "MODIFY",
+      "reason": "forbidden and link-unavailable"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/api/ProblemDetailsHandler.java",
+      "changeType": "MODIFY",
+      "reason": "map 403 and 451"
+    }
+  ],
+  "apis": [
+    "POST /api/v1/links: new 400 invalid-url reasons BLOCKED_DOMAIN and URL_SHORTENER",
+    "POST /api/v1/admin/links/{code}/flag: new (204, 403, 404)",
+    "GET /{code}: 451 link-unavailable for a flagged link",
+    "GET /api/v1/links/{code}: status may be FLAGGED"
+  ],
+  "dataFlows": [
+    "create → UrlValidator: scheme, userinfo, host, self-reference, blocked domains, shorteners, then DNS and private ranges",
+    "flag → UPDATE status FLAGGED → after commit evict L1 and L2 → next redirect reads the row → 451 (not cached)"
+  ],
+  "migrations": [
+    "V3__link_flagged.sql: replace link_status_check to allow FLAGGED"
+  ],
+  "riskNotes": [
+    "Constraint change on the link table: dropping and re-adding a CHECK constraint validates every row; the table is small enough at this stage.",
+    "A flagged link must never be served from cache: evict after the flag commits and never cache the 451.",
+    "Other instances' L1 can still redirect a just-flagged link for up to 5 minutes (same window as BF-1).",
+    "Existing callers construct UrlValidator with five arguments (tests); keep that constructor."
+  ],
+  "testsToUpdate": []
+}

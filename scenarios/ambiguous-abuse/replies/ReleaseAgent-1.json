@@ -1,0 +1,60 @@
+{
+  "checklist": [
+    {
+      "item": "Tests green",
+      "status": "DONE",
+      "evidence": "validation_report: build SUCCESS, 277 tests, 0 failed, 0 errors"
+    },
+    {
+      "item": "Coverage at or above the gate (80 %)",
+      "status": "DONE",
+      "evidence": "validation_report: line coverage 0.95"
+    },
+    {
+      "item": "Policy scan clean",
+      "status": "DONE",
+      "evidence": "no DENY; REQUIRE_APPROVAL only for CHG-001-schema-migration, approved by a human"
+    },
+    {
+      "item": "Migrations reviewed",
+      "status": "DONE",
+      "evidence": "V3__link_flagged.sql replaces link_status_check with a superset (adds FLAGGED); approved through CHG-001"
+    },
+    {
+      "item": "Docs updated",
+      "status": "DONE",
+      "evidence": "docs/api/abuse-protection.md and docs/adr/0005-abuse-protection.md in the diff"
+    },
+    {
+      "item": "Rollback plan ready",
+      "status": "DONE",
+      "evidence": "rollbackPlan below"
+    },
+    {
+      "item": "Every MUST requirement covered",
+      "status": "DONE",
+      "evidence": "FR-1 to FR-4 covered by AbuseIT (AC-1 to AC-8) and DestinationRulesTest"
+    }
+  ],
+  "changelog": "New: links to blocklisted domains and to other URL shorteners are refused (400 invalid-url with reason BLOCKED_DOMAIN or URL_SHORTENER). Admins can flag a link (POST /api/v1/admin/links/{code}/flag); a flagged link answers 451.",
+  "riskRegister": [
+    {
+      "risk": "Other instances' in-process cache can redirect a just-flagged link for up to 5 minutes",
+      "mitigation": "Bounded by shortener.cache.l1-ttl; the same window as BF-1, to be closed by cross-instance invalidation."
+    },
+    {
+      "risk": "The blocklist starts empty and no key is an admin",
+      "mitigation": "Set shortener.abuse.blocked-domains and shortener.abuse.admin-keys per environment as part of the rollout."
+    },
+    {
+      "risk": "Constraint change on the link table",
+      "mitigation": "The new constraint is a superset of the old one; every existing row passes."
+    }
+  ],
+  "rollbackPlan": "Set any FLAGGED rows back to ACTIVE (the old constraint rejects FLAGGED), then revert the merge commit and redeploy; Flyway's V3 stays applied and is harmless.",
+  "openIssues": [
+    "Known issue BF-1 is unchanged by this change: a deleted link can still redirect from cache until its TTL expires.",
+    "Flags cannot be removed through the API yet (out of scope)."
+  ],
+  "finalEngineeringSummary": "## Abuse protection\n\n**What changed.**\n- `UrlValidator` refuses blocklisted domains and other URL shorteners (domain-and-subdomain match; `shortener.abuse.blocked-domains`, `shortener.abuse.shortener-domains`).\n- New `abuse` package: `POST /api/v1/admin/links/{code}/flag` for keys in `shortener.abuse.admin-keys` (403 otherwise).\n- Flyway V3 adds status `FLAGGED`; a flagged link answers 451 `link-unavailable` and is never cached; the flag evicts L1 and L2 after commit.\n\n**How it got here.** The requirement was too vague: four blocking questions were answered (malicious destinations; block at creation plus admin flagging; our own list, no external API; no rescan). After the design was approved the requirement was amended to also refuse links to other shorteners, which re-planned the run from the requirements onward.\n\n**How it was verified.** `mvn -q -pl shortener-service -am verify`: 277 tests green, 95 % line coverage."
+}

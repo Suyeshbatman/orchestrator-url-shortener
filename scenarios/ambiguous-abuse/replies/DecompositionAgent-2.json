@@ -1,0 +1,96 @@
+{
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Flyway V3: allow status FLAGGED",
+      "type": "MIGRATION",
+      "requirementIds": [
+        "FR-3"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "shortener-service/src/main/resources/db/migration/V3__link_flagged.sql"
+      ],
+      "risk": "HIGH"
+    },
+    {
+      "id": "T2",
+      "title": "Destination rules: blocked domains and other URL shorteners refused at creation (400 invalid-url)",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-1",
+        "FR-2",
+        "NFR-1"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/abuse/AbuseProperties.java",
+        "shortener-service/src/main/java/com/acme/shortener/url/UrlValidator.java",
+        "shortener-service/src/main/java/com/acme/shortener/url/InvalidUrlException.java",
+        "shortener-service/src/main/java/com/acme/shortener/config/UrlConfig.java",
+        "shortener-service/src/main/java/com/acme/shortener/config/CodeConfig.java"
+      ],
+      "risk": "HIGH"
+    },
+    {
+      "id": "T3",
+      "title": "Admin flag endpoint, FLAGGED status and 451 on redirect",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-3",
+        "FR-4",
+        "FR-5",
+        "NFR-2"
+      ],
+      "dependsOn": [
+        "T1"
+      ],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/abuse/AdminController.java",
+        "shortener-service/src/main/java/com/acme/shortener/abuse/NotAdminException.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/Link.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkStatus.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkService.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkUnavailableException.java",
+        "shortener-service/src/main/java/com/acme/shortener/api/ProblemTypes.java",
+        "shortener-service/src/main/java/com/acme/shortener/api/ProblemDetailsHandler.java"
+      ],
+      "risk": "HIGH"
+    },
+    {
+      "id": "T4",
+      "title": "Tests for destination rules and flagging",
+      "type": "TEST",
+      "requirementIds": [
+        "FR-1",
+        "FR-2",
+        "FR-3",
+        "FR-4",
+        "FR-5"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "shortener-service/src/test/java/com/acme/shortener/abuse/AbuseIT.java",
+        "shortener-service/src/test/java/com/acme/shortener/url/DestinationRulesTest.java"
+      ],
+      "risk": "LOW"
+    },
+    {
+      "id": "T5",
+      "title": "API note and ADR",
+      "type": "DOC",
+      "requirementIds": [
+        "FR-1",
+        "FR-2",
+        "FR-3",
+        "FR-4"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "docs/api/abuse-protection.md",
+        "docs/adr/0005-abuse-protection.md"
+      ],
+      "risk": "LOW"
+    }
+  ]
+}
