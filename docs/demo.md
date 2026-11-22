@@ -1,14 +1,16 @@
 # Demo
 
 ## The automatic demo (about 8 minutes, no API key)
-From the repository root, with Docker Desktop running:
+From the repository root, with Docker Desktop running and nothing else on port 8086. A fresh
+clone needs no `.env`:
 ```
 .\mvnw.cmd -q install -DskipTests
 .\mvnw.cmd -q -pl orchestrator-cli exec:java "-Dexec.args=demo"
 ```
 It runs these steps, each under its own banner:
-1. **Postgres and Redis** (`docker compose up -d --wait`) and a fresh database `orchestrator_demo`.
-   Your own runs in `orchestrator` are untouched.
+1. **A Postgres of its own**: compose project `orchestrator-demo` on port **5435** with a
+   demo-only password, and a fresh database `orchestrator_demo`. It needs no `.env` and never
+   touches your containers, ports or data. Remove it with `docker compose -p orchestrator-demo down -v`.
 2. **A bare copy of this repository** with `main` at `phase-7`, the code the scenario fixtures were
    recorded against. The runs clone from it and publish into it.
 3. **The orchestrator app on 8086**, in replay mode, with operator and approver keys made up for

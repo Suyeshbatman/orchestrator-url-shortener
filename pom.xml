@@ -37,6 +37,10 @@
     <spotless.version>3.11.0</spotless.version>
     <jqwik.version>1.10.2</jqwik.version>
     <archunit.version>1.5.1</archunit.version>
+    <!-- -DskipTests skips the integration tests too (failsafe only honours skipITs by default) -->
+    <skipTests>false</skipTests>
+    <!-- and coverage: no tests, no data, so no gate (a stale jacoco.exec would fail it) -->
+    <jacoco.skip>${skipTests}</jacoco.skip>
     <springdoc.version>3.2.1</springdoc.version>
     <resilience4j.version>2.4.0</resilience4j.version>
     <anthropic-java.version>3.6.0</anthropic-java.version>
@@ -140,6 +144,9 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <skipITs>${skipTests}</skipITs>
+        </configuration>
         <executions>
           <execution>
             <goals>

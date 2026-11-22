@@ -38,7 +38,7 @@ Linux.
 
 The full demo runs the same three scenarios through the orchestrator's HTTP API on Postgres, with
 printed approval summaries, audit checks and the metrics summary. It takes about 8 minutes and
-starts `docker compose` itself:
+starts its own Postgres (Docker, port 5435), so it needs no `.env` either:
 ```
 .\mvnw.cmd -q -pl orchestrator-cli exec:java "-Dexec.args=demo"
 ```

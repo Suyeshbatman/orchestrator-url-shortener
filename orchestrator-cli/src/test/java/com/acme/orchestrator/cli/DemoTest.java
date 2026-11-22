@@ -98,12 +98,12 @@ class DemoTest {
   @Test
   void theDemoAppRunsInReplayWithOneOffKeysAndItsOwnDatabaseAndRepository() {
     Map<String, String> vars =
-        Demo.appEnvironment(
-            "5434", Path.of("work"), Path.of("work", "remote.git"), "op", "ap", 8086);
+        Demo.appEnvironment(Path.of("work"), Path.of("work", "remote.git"), "op", "ap", 8086);
 
     assertThat(vars)
         .containsEntry("ORCH_LLM_MODE", "replay")
-        .containsEntry("ORCH_POSTGRES_URL", "jdbc:postgresql://localhost:5434/orchestrator_demo")
+        .containsEntry("ORCH_POSTGRES_URL", "jdbc:postgresql://localhost:5435/orchestrator_demo")
+        .containsEntry("POSTGRES_PASSWORD", "orchestrator-demo-only") // its own database, no .env
         .containsEntry("ORCH_OPERATOR_KEYS", "bob:" + Hashing.sha256Hex("op"))
         .containsEntry("ORCH_APPROVER_KEYS", "alice:" + Hashing.sha256Hex("ap"))
         .containsEntry("SERVER_PORT", "8086");

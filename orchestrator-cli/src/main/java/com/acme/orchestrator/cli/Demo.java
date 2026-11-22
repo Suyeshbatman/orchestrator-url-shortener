@@ -21,7 +21,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The end-to-end demo, in replay mode with no API key: starts Postgres and Redis, starts the
+ * The end-to-end demo, in replay mode with no API key: starts a Postgres of its own, starts the
  * orchestrator app against a fresh database, runs the three scenarios through its HTTP API with the
  * scenarios' scripted humans, and prints each run's audit check and the metrics summary.
  *
@@ -34,6 +34,21 @@ final class Demo {
   static final List<String> SCENARIOS =
       List.of("greenfield-qr-code", "brownfield-expiry-bf1", "ambiguous-abuse");
   static final String DATABASE = "orchestrator_demo";
+
+  /**
+   * The demo's own Postgres: a separate compose project on its own port with a demo-only password,
+   * so it needs no .env and never touches the developer's containers, ports or data. Remove it with
+   * {@code docker compose -p orchestrator-demo down -v}.
+   */
+  static final String COMPOSE_PROJECT = "orchestrator-demo";
+
+  static final String POSTGRES_PORT = "5435";
+  static final Map<String, String> POSTGRES =
+      Map.of(
+          "POSTGRES_USER", "app",
+          "POSTGRES_PASSWORD", "orchestrator-demo-only",
+          "POSTGRES_DB", "shortener",
+          "POSTGRES_PORT", POSTGRES_PORT);
   static final Set<String> SHOWN =
       Set.of(
           "STAGE_SUCCEEDED",
@@ -69,22 +84,25 @@ final class Demo {
           "something already answers on " + url + ": stop the orchestrator app first");
     }
 
-    banner("1/5 Postgres and Redis (docker compose), fresh database " + DATABASE);
-    exec(root, List.of("docker", "compose", "up", "-d", "--wait", "postgres", "redis"));
-    exec(
+    banner(
+        "1/5 a Postgres of its own (compose project "
+            + COMPOSE_PROJECT
+            + ", port "
+            + POSTGRES_PORT
+            + "), fresh database "
+            + DATABASE);
+    compose(root, "up", "-d", "--wait", "postgres");
+    compose(
         root,
-        List.of(
-            "docker",
-            "compose",
-            "exec",
-            "-T",
-            "postgres",
-            "sh",
-            "-c",
-            "dropdb -U \"$POSTGRES_USER\" --if-exists --force "
-                + DATABASE
-                + " && createdb -U \"$POSTGRES_USER\" "
-                + DATABASE));
+        "exec",
+        "-T",
+        "postgres",
+        "sh",
+        "-c",
+        "dropdb -U \"$POSTGRES_USER\" --if-exists --force "
+            + DATABASE
+            + " && createdb -U \"$POSTGRES_USER\" "
+            + DATABASE);
 
     banner("2/5 the repository the runs clone and publish to (main at phase-7)");
     ScenarioRunner.deleteTree(work);
@@ -201,14 +219,7 @@ final class Demo {
     ProcessBuilder builder = new ProcessBuilder(command).directory(root.toFile());
     Map<String, String> childEnv = builder.environment();
     childEnv.remove("ANTHROPIC_API_KEY"); // replay only
-    childEnv.putAll(
-        appEnvironment(
-            env.variables().getOrDefault("POSTGRES_PORT", "5434"),
-            work,
-            remote,
-            operatorKey,
-            approverKey,
-            url.getPort()));
+    childEnv.putAll(appEnvironment(work, remote, operatorKey, approverKey, url.getPort()));
     builder.redirectErrorStream(true);
     builder.redirectOutput(work.resolve("orchestrator-app.log").toFile());
     return builder.start();
@@ -216,15 +227,10 @@ final class Demo {
 
   /** The app's settings for the demo: replay, the demo database and repository, one-off keys. */
   static Map<String, String> appEnvironment(
-      String postgresPort,
-      Path work,
-      Path remote,
-      String operatorKey,
-      String approverKey,
-      int port) {
-    Map<String, String> vars = new HashMap<>();
+      Path work, Path remote, String operatorKey, String approverKey, int port) {
+    Map<String, String> vars = new HashMap<>(POSTGRES); // real env vars beat the app's .env import
     vars.put("ORCH_LLM_MODE", "replay");
-    vars.put("ORCH_POSTGRES_URL", "jdbc:postgresql://localhost:" + postgresPort + "/" + DATABASE);
+    vars.put("ORCH_POSTGRES_URL", "jdbc:postgresql://localhost:" + POSTGRES_PORT + "/" + DATABASE);
     vars.put("ORCH_SOURCE_REPO", remote.toAbsolutePath().toString());
     vars.put("ORCH_BASE_BRANCH", "main");
     vars.put("ORCH_WORKSPACE_ROOT", work.resolve("worktrees").toAbsolutePath().toString());
@@ -250,9 +256,18 @@ final class Demo {
     }
   }
 
-  private void exec(Path dir, List<String> command) throws IOException, InterruptedException {
-    Process p =
-        new ProcessBuilder(command).directory(dir.toFile()).redirectErrorStream(true).start();
+  /** {@code docker compose -p orchestrator-demo …} with the demo's Postgres settings. */
+  private void compose(Path dir, String... args) throws IOException, InterruptedException {
+    List<String> command = new ArrayList<>(List.of("docker", "compose", "-p", COMPOSE_PROJECT));
+    command.addAll(List.of(args));
+    ProcessBuilder builder = new ProcessBuilder(command).directory(dir.toFile());
+    builder.environment().putAll(POSTGRES);
+    exec(builder, command);
+  }
+
+  private void exec(ProcessBuilder builder, List<String> command)
+      throws IOException, InterruptedException {
+    Process p = builder.redirectErrorStream(true).start();
     String output = new String(p.getInputStream().readAllBytes());
     if (p.waitFor() != 0) {
       throw new IllegalStateException(String.join(" ", command) + " failed:\n" + output.strip());
