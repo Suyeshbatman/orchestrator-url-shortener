@@ -143,6 +143,9 @@ replay fixtures) **or** `requirementText`:
 { "requirementText": "Add a QR code endpoint…", "mode": "BROWNFIELD" }
 ```
 - `mode`: `GREENFIELD` | `BROWNFIELD`.
+- `workflow` (optional): a file in `config/workflows` without `.yml`. The default is
+  `sdlc-standard`; `sdlc-fanout` runs implementation as one sub-stage per code task
+  (`implementation.T1`, …). An unknown workflow is a 400.
 - `autonomyLevel`: `L0_SUGGEST` | `L1_SUPERVISED` (default) | `L2_TRUSTED` (see
   `workflows-and-policies.md`).
 

@@ -62,9 +62,23 @@ flowchart LR
 ```
 Stages with a thick border need a human approval.
 - **Skipping:** `impact_analysis` is skipped for GREENFIELD runs.
-- **Fan-out (not yet):** the workflow marks `implementation` with `expand: tasks`, and `Dag.expand`
-  (per-task sub-stages that keep the tasks' dependencies) exists and is tested. But the coordinator
-  doesn't apply it yet, so `implementation` runs as one stage over the whole task graph.
+- **Fan-out (opt-in, `sdlc-fanout.yml`):** a stage marked `expand: tasks` is replaced, when it
+  becomes ready, by one sub-stage per `CODE`/`CONFIG`/`MIGRATION` task of the task graph
+  (`implementation.T1`, `implementation.T2`, …). The sub-stages are recorded as `STAGE_EXPANDED`, so a
+  restarted coordinator rebuilds the same graph.
+  - They keep the tasks' dependencies. Tasks whose `estimatedFiles` overlap are chained in task
+    order, and the rest run in parallel.
+  - Each sub-stage is a full stage, with its own attempts, retries, fallback, checkpoint and
+    approval.
+  - A failed attempt restores only the files it wrote (`CheckpointManager.restorePaths`), because
+    the other sub-stages share the workspace.
+  - A write to a file another task is writing, or wrote after this attempt started, fails the
+    attempt as a validation error, and the attempt is retried (`WriteClaims`).
+  - A loop-back to the stage re-runs every task. A new task graph re-expands the stage.
+  - A task graph with no code tasks runs the stage once, unexpanded.
+
+  The default `sdlc-standard.yml` runs `implementation` once over all tasks. The recorded scenarios
+  use it.
 - **Joins:** `validation` and `docs_finalize` wait for all their inputs.
 - **High impact:** `publish` halts the run, instead of failing it, if it fails.
 

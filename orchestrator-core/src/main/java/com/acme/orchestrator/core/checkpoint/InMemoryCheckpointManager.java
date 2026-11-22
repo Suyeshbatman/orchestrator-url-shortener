@@ -51,6 +51,23 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     restored.add(ref);
   }
 
+  /** Only {@code paths}: each back to its content in the snapshot, or removed if it had none. */
+  @Override
+  public synchronized void restorePaths(CheckpointRef ref, java.util.Collection<String> paths) {
+    Map<String, String> snapshot = snapshots.get(ref.id());
+    if (snapshot == null) {
+      throw new IllegalArgumentException("unknown checkpoint " + ref.id());
+    }
+    for (String path : paths) {
+      if (snapshot.containsKey(path)) {
+        files.put(path, snapshot.get(path));
+      } else {
+        files.remove(path);
+      }
+    }
+    restored.add(ref);
+  }
+
   /** Checkpoints restored so far, in order. */
   public synchronized List<CheckpointRef> restored() {
     return List.copyOf(restored);

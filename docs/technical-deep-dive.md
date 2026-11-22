@@ -507,10 +507,28 @@ result has a deterministic order. Replays and tests depend on that.
 | `levels` | the topological order, with each node one level below its deepest dependency (parallel layers) | O(V + E) |
 | `readyNodes` | the PENDING nodes whose dependencies all satisfy (`SUCCEEDED` / `SKIPPED`) | O(V + E) per scheduling pass |
 | `downstreamClosure` / `upstreamClosure` | **BFS** | O(V + E) |
-| `expand` (implemented, not wired in yet) | replace a node by a subgraph of tasks, keeping their internal dependencies and the node's outside edges | O(V + E + tasks) |
+| `expand` | replace a node by a subgraph of tasks, keeping their internal dependencies and the node's outside edges (the fan-out, below) | O(V + E + tasks) |
 
 V and E are tens, so recomputing on every pass is cheaper than maintaining incremental structures,
 and simpler.
+
+**Task fan-out** (`TaskExpansion`, opt-in through `sdlc-fanout.yml`). When a stage marked
+`expand: tasks` becomes ready:
+1. The coordinator plans one sub-stage per code task of the latest `task_graph`, with key
+   `<stage>.<task>`. Stage ids can't contain a dot, so a key never clashes with a stage id.
+2. It adds an edge from each task to every earlier task that shares an estimated file, unless the
+   later task already reaches it. That is a pairwise check with a BFS reachability test:
+   O(T² · (T + E)) for T tasks, and T is a handful.
+3. It records `STAGE_EXPANDED`.
+4. It rebuilds the run graph as `WorkflowGraph.of(workflow)` plus the latest expansion of each
+   stage. Recovery and the dashboard rebuild the same graph from the log.
+
+The tasks share one workspace, so there are two more rules:
+- **Selective restore.** A failed attempt restores only the paths it wrote, taken from its
+  `file_write` policy checks.
+- **Write claims.** `WriteClaims` is a path → (task, logical tick, live) map. A write fails the
+  attempt when another task holds the path, or wrote it after this attempt began. The retry then
+  starts from the newer file, so no change is silently lost.
 
 ### 5.10 Record and replay: content-addressed fixtures
 - **The key:** `requestHash = SHA-256(canonicalJson({agent, system, user, schema}))`. Each fixture is

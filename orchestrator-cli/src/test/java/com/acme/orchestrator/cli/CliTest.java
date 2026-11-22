@@ -84,6 +84,12 @@ class CliTest {
     assertThat(s.amend()).contains(new Scenario.Amendment("design", "also X"));
     assertThat(s.answersJson()).contains("{\"answers\":[]}");
     assertThat(s.base()).isEqualTo("main");
+    assertThat(s.workflow()).isEqualTo("sdlc-standard");
+
+    Files.writeString(dir.resolve("scenario.yml"), "workflow: sdlc-fanout\n");
+    assertThat(Scenario.load(tmp, "demo").workflow()).isEqualTo("sdlc-fanout");
+    Files.writeString(dir.resolve("scenario.yml"), "workflow: ../policies\n");
+    assertThatThrownBy(() -> Scenario.load(tmp, "demo")).hasMessageContaining("bad workflow");
 
     Files.writeString(dir.resolve("scenario.yml"), "mode: GREENFIELD\ntypo: 1\n");
     assertThatThrownBy(() -> Scenario.load(tmp, "demo"))

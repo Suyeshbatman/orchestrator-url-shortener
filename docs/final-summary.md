@@ -114,8 +114,10 @@ model time. Live calls took 1–15 minutes each for large replies.
   The head hash is not anchored externally.
 - **L-7** Latency figures come from replay runs, without model time. Live calls take minutes each.
 - **L-8** Live calls are non-streaming, so very large replies take many minutes.
-- **L-9** `expand: tasks` is parsed but not applied: implementation runs as one stage over all tasks
-  instead of one sub-stage per task (`Dag.expand` exists and is tested; the coordinator doesn't use it).
+- **L-9** The per-task fan-out is opt-in (`sdlc-fanout.yml`) and has no recorded scenario yet. The
+  three scenarios use `sdlc-standard.yml`, where implementation is one stage over all tasks.
+  - Tasks that touch the same files are serialised only on their *estimated* files.
+  - An unannounced overlap is caught when the file is written, and that task is retried.
 
 ## Future work
 - **An egress allowlist for the sandbox** (Maven Central and the container registry only), closing

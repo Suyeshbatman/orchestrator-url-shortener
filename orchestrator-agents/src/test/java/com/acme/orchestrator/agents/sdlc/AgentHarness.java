@@ -83,6 +83,15 @@ final class AgentHarness {
         run, stage, feedback.size() + 1, feedback, artifacts, tools, policies, fallback);
   }
 
+  /** For one task of a fanned-out stage. */
+  StageContext taskContext(
+      String stage,
+      com.acme.orchestrator.core.engine.TaskExpansion.Task task,
+      ToolRegistry tools,
+      PolicyEngine policies) {
+    return StageContext.standaloneTask(run, stage, task, artifacts, tools, policies);
+  }
+
   StageContext context(String stage) {
     return context(stage, List.of(), ToolRegistry.EMPTY);
   }

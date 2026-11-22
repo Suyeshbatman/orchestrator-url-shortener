@@ -37,9 +37,14 @@ public final class ImplementationAgent extends LlmAgent {
             .map(a -> a.contentJson())
             .orElse("None (greenfield).");
     List<String> paths = new ArrayList<>();
-    graph
-        .path("tasks")
-        .forEach(t -> t.path("estimatedFiles").forEach(f -> paths.add(f.asString(""))));
+    ctx.task()
+        .ifPresentOrElse(
+            task -> paths.addAll(task.files()), // one task of a fan-out: only its files
+            () ->
+                graph
+                    .path("tasks")
+                    .forEach(
+                        t -> t.path("estimatedFiles").forEach(f -> paths.add(f.asString("")))));
     JSON.readTree(impact.startsWith("{") ? impact : "{}")
         .path("files")
         .forEach(f -> paths.add(f.path("path").asString("")));
@@ -82,11 +87,24 @@ public final class ImplementationAgent extends LlmAgent {
   }
 
   private static String strategy(StageContext ctx) {
+    String scope =
+        ctx.task()
+            .map(t ->
+                "Implement ONLY task "
+                    + t.id()
+                    + " ("
+                    + t.title()
+                    + ") of the task graph, touching only its files "
+                    + t.files()
+                    + ". Other tasks are implemented separately, some at the same time: don't"
+                    + " change their files.")
+            .orElse("Implement every task in the task graph.");
     return minimal(ctx)
         ? "This is a fallback attempt after earlier attempts failed: change exactly ONE file, with"
             + " the smallest change that satisfies the acceptance criteria. Leave everything else"
             + " as it is."
-        : "Implement every task in the task graph.";
+            + ctx.task().map(t -> " Scope: task " + t.id() + " only.").orElse("")
+        : scope;
   }
 
   private static boolean minimal(StageContext ctx) {

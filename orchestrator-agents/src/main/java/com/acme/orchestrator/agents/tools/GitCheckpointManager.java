@@ -83,6 +83,39 @@ public final class GitCheckpointManager implements CheckpointManager {
     }
   }
 
+  /**
+   * Only {@code paths}: each is checked out from the checkpoint commit, or deleted if the commit
+   * doesn't have it. The rest of the workspace (other tasks' work) is left alone.
+   */
+  @Override
+  public void restorePaths(CheckpointRef ref, java.util.Collection<String> paths) {
+    Workspace workspace = workspaces.apply(ref.runId());
+    PathGuard guard = new PathGuard(workspace.root());
+    try (Git git = Git.open(workspace.root().toFile())) {
+      if (!ObjectId.isId(ref.id())
+          || !git.getRepository().getObjectDatabase().has(ObjectId.fromString(ref.id()))) {
+        throw new IllegalArgumentException("unknown checkpoint " + ref.id());
+      }
+      org.eclipse.jgit.revwalk.RevCommit commit =
+          git.getRepository().parseCommit(ObjectId.fromString(ref.id()));
+      for (String path : paths) {
+        java.nio.file.Path file = guard.resolve(path);
+        try (org.eclipse.jgit.treewalk.TreeWalk walk =
+            org.eclipse.jgit.treewalk.TreeWalk.forPath(
+                git.getRepository(), path, commit.getTree())) {
+          if (walk == null) {
+            java.nio.file.Files.deleteIfExists(file); // didn't exist at the checkpoint
+          } else {
+            git.checkout().setStartPoint(commit).addPath(path).call();
+          }
+        }
+      }
+    } catch (GitAPIException | IOException e) {
+      throw new IllegalStateException(
+          "cannot restore " + paths + " from checkpoint " + ref.id(), e);
+    }
+  }
+
   static String refName(String runId, String label) {
     return "refs/orch/" + runId + "/" + label.replaceAll("[^A-Za-z0-9._-]", "_");
   }

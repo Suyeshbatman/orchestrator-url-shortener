@@ -15,9 +15,11 @@ import com.acme.orchestrator.app.persistence.RunRepository;
 import com.acme.orchestrator.app.persistence.RunRepository.RunRow;
 import com.acme.orchestrator.core.artifact.ArtifactDraft;
 import com.acme.orchestrator.core.artifact.ArtifactStore;
+import com.acme.orchestrator.core.dag.Dag;
 import com.acme.orchestrator.core.engine.Command;
 import com.acme.orchestrator.core.engine.Command.ApprovalDecision;
 import com.acme.orchestrator.core.engine.Coordinator;
+import com.acme.orchestrator.core.engine.TaskExpansion;
 import com.acme.orchestrator.core.event.AuditReport;
 import com.acme.orchestrator.core.event.AuditVerifier;
 import com.acme.orchestrator.core.event.CanonicalJson;
@@ -96,7 +98,14 @@ public final class RunService {
     }
     String requirement =
         scenario ? scenarioRequirement(request.scenarioId()) : request.requirementText().strip();
-    WorkflowDefinition workflow = workflow(STANDARD_WORKFLOW);
+    String workflowFile =
+        request.workflow() == null || request.workflow().isBlank()
+            ? STANDARD_WORKFLOW
+            : request.workflow() + ".yml";
+    if (!Files.isRegularFile(props.workflowsDir().resolve(workflowFile))) {
+      throw ApiException.badRequest("no workflow " + workflowFile);
+    }
+    WorkflowDefinition workflow = workflow(workflowFile);
     String id = "run-" + HexFormat.of().formatHex(RANDOM.generateSeed(6));
     Run run =
         Run.create(
@@ -107,7 +116,7 @@ public final class RunService {
                 ? AutonomyLevel.L1_SUPERVISED
                 : request.autonomyLevel());
     Optional<String> scenarioId = scenario ? Optional.of(request.scenarioId()) : Optional.empty();
-    runs.registerLaunch(run, STANDARD_WORKFLOW, scenarioId);
+    runs.registerLaunch(run, workflowFile, scenarioId);
     artifacts.save(
         new ArtifactDraft(
             id,
@@ -150,13 +159,25 @@ public final class RunService {
     RunRow row = row(runId);
     WorkflowDefinition workflow = workflow(row.workflowFile());
     Map<String, StageInstance> stages = state(runId).map(RunState::stages).orElse(Map.of());
+    // a fanned-out stage shows as its tasks (implementation.T1, ...), as the coordinator runs it
+    Map<String, TaskExpansion> expansions = TaskExpansion.latest(events.events(runId));
+    Dag<String> graph = TaskExpansion.graph(workflow, expansions);
+    List<String> keys = new ArrayList<>();
+    for (StageDefinition def : workflow.stages()) { // in workflow order
+      if (graph.contains(def.id())) {
+        keys.add(def.id());
+      } else {
+        keys.addAll(expansions.get(def.id()).keys());
+      }
+    }
     List<StageNode> nodes = new ArrayList<>();
     List<Edge> edges = new ArrayList<>();
-    for (StageDefinition def : workflow.stages()) {
-      StageInstance s = stages.get(def.id());
+    for (String key : keys) {
+      StageDefinition def = workflow.stage(TaskExpansion.stageIdOf(key)).orElseThrow();
+      StageInstance s = stages.get(key);
       nodes.add(
           new StageNode(
-              def.id(),
+              key,
               def.executor().name(),
               s == null ? "PENDING" : s.status().name(),
               s == null ? 0 : s.attempt(),
@@ -164,7 +185,7 @@ public final class RunService {
               s == null ? null : s.startedAt().orElse(null),
               s == null ? null : s.endedAt().orElse(null),
               def.approval().required()));
-      def.dependsOn().forEach(dep -> edges.add(new Edge(dep, def.id())));
+      graph.dependenciesOf(key).forEach(dep -> edges.add(new Edge(dep, key)));
     }
     return new RunView(summary(row), nodes, edges);
   }
@@ -175,7 +196,7 @@ public final class RunService {
     StringBuilder m = new StringBuilder("flowchart LR\n");
     for (StageNode n : view.nodes()) {
       m.append("  ")
-          .append(n.id())
+          .append(mermaidId(n.id()))
           .append("[\"")
           .append(n.id())
           .append("<br/>")
@@ -186,7 +207,12 @@ public final class RunService {
           .append('\n');
     }
     view.edges()
-        .forEach(e -> m.append("  ").append(e.from()).append(" --> ").append(e.to()).append('\n'));
+        .forEach(e ->
+            m.append("  ")
+                .append(mermaidId(e.from()))
+                .append(" --> ")
+                .append(mermaidId(e.to()))
+                .append('\n'));
     for (Map.Entry<String, String> style : MERMAID_STYLES.entrySet()) {
       m.append("  classDef ")
           .append(style.getKey())
@@ -195,6 +221,11 @@ public final class RunService {
           .append('\n');
     }
     return m.toString();
+  }
+
+  /** A Mermaid node id: task keys contain a dot, which Mermaid doesn't allow in ids. */
+  private static String mermaidId(String key) {
+    return key.replaceAll("[^A-Za-z0-9_]", "_");
   }
 
   private static final Map<String, String> MERMAID_STYLES =

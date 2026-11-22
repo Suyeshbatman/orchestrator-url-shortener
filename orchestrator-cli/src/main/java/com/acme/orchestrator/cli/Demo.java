@@ -160,7 +160,8 @@ final class Demo {
                 Map.of(
                     "scenarioId", id,
                     "mode", scenario.mode().name(),
-                    "autonomyLevel", scenario.autonomy().name()))
+                    "autonomyLevel", scenario.autonomy().name(),
+                    "workflow", scenario.workflow()))
             .path("run")
             .path("id")
             .asString();

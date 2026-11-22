@@ -93,6 +93,26 @@ class DeliveryAgentsTest {
   }
 
   @Test
+  void oneTaskOfAFanOutIsImplementedOnItsOwn() throws Exception {
+    String patch =
+        "{\"summary\":\"encoder\",\"files\":[{\"path\":\""
+            + QR
+            + "\",\"newContent\":\"class Q {}\"}]}";
+    var task =
+        new com.acme.orchestrator.core.engine.TaskExpansion.Task(
+            "T2", "QR encoder", List.of(), List.of(QR));
+
+    new ImplementationAgent(h.recording(replay, patch))
+        .execute(h.taskContext("implementation.T2", task, tools, POLICIES));
+
+    assertThat(read(QR)).isEqualTo("class Q {}");
+    assertThat(h.sent.getFirst().systemPrompt())
+        .contains("Implement ONLY task T2 (QR encoder)")
+        .doesNotContain("Implement every task in the task graph.");
+    assertThat(h.sent.getFirst().userPrompt()).doesNotContain("### " + LINK); // not its file
+  }
+
+  @Test
   void aPatchTouchingAForbiddenPathIsRefused() {
     String patch =
         "{\"summary\":\"bump a dependency\",\"files\":[{\"path\":\"pom.xml\","

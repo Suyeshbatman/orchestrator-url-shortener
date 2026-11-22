@@ -75,14 +75,15 @@ class OrchestrationApiIT {
     registry.add("orchestrator.scenarios-dir", scenarios::toString);
   }
 
-  /** The standard workflow with fake agents; the requirements agent asks until it has answers. */
+  /**
+   * The run's workflow with fake agents; the requirements agent asks until it has answers, and the
+   * decomposition has two code tasks (one sub-stage each in sdlc-fanout).
+   */
   @TestConfiguration(proxyBeanMethods = false)
   static class FakeAgents {
     @Bean
     @Primary
     RunLauncher fakeLauncher(EventStore events, ArtifactStore artifacts, ActiveRuns active) {
-      var workflow =
-          new WorkflowLoader().load(Path.of("..", "config", "workflows", "sdlc-standard.yml"));
       GateRegistry real = GateRegistry.standard(SchemaValidator.STRUCTURE_ONLY);
       GateEvaluator gates =
           (gate, ctx) ->
@@ -118,7 +119,20 @@ class OrchestrationApiIT {
         agents.put(name, other);
       }
       agents.put("RequirementsAgent", requirements);
+      agents.put(
+          "DecompositionAgent",
+          ctx ->
+              AgentResult.success(
+                  "tasks",
+                  ArtifactOutput.of(
+                      "task_graph",
+                      "{\"tasks\":[{\"id\":\"T1\",\"type\":\"CODE\",\"estimatedFiles\":[\"a\"]},"
+                          + "{\"id\":\"T2\",\"type\":\"CODE\",\"estimatedFiles\":[\"b\"]}]}",
+                      "fake")));
+      agents.put("ImplementationAgent", ctx -> AgentResult.success(ctx.stageKey()));
       return (row, run) -> {
+        var workflow =
+            new WorkflowLoader().load(Path.of("..", "config", "workflows", row.workflowFile()));
         Coordinator c =
             Coordinator.start(
                 workflow,
@@ -235,7 +249,8 @@ class OrchestrationApiIT {
             "{\"mode\":\"GREENFIELD\"}",
             "{\"requirementText\":\"x\",\"scenarioId\":\"qr-codes\",\"mode\":\"GREENFIELD\"}",
             "{\"requirementText\":\"x\"}",
-            "{\"scenarioId\":\"../../etc\",\"mode\":\"GREENFIELD\"}")) {
+            "{\"scenarioId\":\"../../etc\",\"mode\":\"GREENFIELD\"}",
+            "{\"requirementText\":\"x\",\"mode\":\"GREENFIELD\",\"workflow\":\"../x\"}")) {
       call(post("/api/runs").contentType(MediaType.APPLICATION_JSON).content(body), OPERATOR)
           .andExpect(status().isBadRequest())
           .andExpect(jsonPath("$.type").value("/problems/validation-failed"));
@@ -254,6 +269,14 @@ class OrchestrationApiIT {
             OPERATOR)
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.type").value("/problems/scenario-not-found"));
+    call(
+            post("/api/runs")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"requirementText\":\"x\",\"mode\":\"GREENFIELD\",\"workflow\":\"nope\"}"),
+            OPERATOR)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.detail").value("no workflow nope.yml"));
     call(get("/api/runs/run-missing"), OPERATOR)
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.type").value("/problems/run-not-found"));
@@ -268,6 +291,54 @@ class OrchestrationApiIT {
   }
 
   // ---- a whole run ----------------------------------------------------------------------------
+
+  @Test
+  void aFanOutRunShowsOneNodePerTask() throws Exception {
+    String id =
+        createRun(
+            "{\"requirementText\":\"Add QR codes.\",\"mode\":\"GREENFIELD\","
+                + "\"workflow\":\"sdlc-fanout\"}");
+    assertThat(run(id).path("nodes")).hasSize(11); // not expanded yet
+
+    JsonNode questions = pending(id, "requirements");
+    call(
+            post("/api/runs/" + id + "/answers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"answers\":[{\"ambiguityId\":\"AMB-1\",\"answer\":\"PNG\"}]}"),
+            OPERATOR)
+        .andExpect(status().isAccepted());
+    decide(
+        await()
+            .atMost(WAIT)
+            .until(
+                () -> pending(id, "requirements"),
+                a -> !a.path("id").asString().equals(questions.path("id").asString())),
+        "APPROVE");
+    decide(pending(id, "design"), "APPROVE");
+    decide(pending(id, "release_readiness"), "APPROVE");
+    decide(pending(id, "publish"), "APPROVE");
+    await()
+        .atMost(WAIT)
+        .until(() -> run(id).path("run").path("status").asString(), "COMPLETED"::equals);
+
+    JsonNode view = run(id);
+    assertThat(view.path("nodes")).hasSize(12); // implementation became T1 and T2
+    assertThat(view.path("nodes").toString())
+        .contains("\"id\":\"implementation.T1\"", "\"id\":\"implementation.T2\"")
+        .doesNotContain("\"id\":\"implementation\"");
+    assertThat(view.path("edges").toString())
+        .contains("{\"from\":\"design\",\"to\":\"implementation.T1\"}")
+        .contains("{\"from\":\"implementation.T2\",\"to\":\"validation\"}");
+    assertThat(stageStatus(id, "implementation.T2")).isEqualTo("SUCCEEDED");
+    call(get("/api/runs/" + id + "/dag.mmd"), OPERATOR)
+        .andExpect(
+            content()
+                .string(
+                    org.hamcrest.Matchers.containsString(
+                        "implementation_T1[\"implementation.T1<br/>SUCCEEDED\"]:::succeeded")))
+        .andExpect(
+            content().string(org.hamcrest.Matchers.containsString("design --> implementation_T2")));
+  }
 
   @Test
   void aScenarioRunGoesThroughEveryHumanCheckpointOverHttp() throws Exception {

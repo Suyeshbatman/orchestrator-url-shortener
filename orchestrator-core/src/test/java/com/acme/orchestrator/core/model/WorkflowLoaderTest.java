@@ -63,7 +63,7 @@ class WorkflowLoaderTest {
         .containsExactly("decomposition", "impact_analysis");
 
     StageDefinition impl = wf.stage("implementation").orElseThrow();
-    assertThat(impl.expand()).contains("tasks");
+    assertThat(impl.expand()).isEmpty(); // the fan-out is opt-in: sdlc-fanout.yml
     assertThat(impl.checkpoint()).isEqualTo(CheckpointKind.GIT);
     assertThat(impl.retry().maxAttempts()).isEqualTo(3); // stage override...
     assertThat(impl.retry().baseDelay()).isEqualTo(Duration.ofSeconds(2)); // ...on top of defaults

@@ -263,6 +263,26 @@ class WorkspaceAndFilesTest {
   }
 
   @Test
+  void restoringSomePathsLeavesTheRestOfTheWorkspaceAlone() throws Exception {
+    GitCheckpointManager checkpoints =
+        new GitCheckpointManager(runId -> workspace, Clock.systemUTC());
+    String extra = "shortener-service/src/main/java/com/acme/shortener/Extra.java";
+    files.write(QR, "class Qr {}\n");
+    var before = checkpoints.create("run-1", "implementation.T1");
+
+    files.write(QR, "class Qr { mine");
+    files.write(extra, "class Extra {}\n"); // new since the checkpoint
+    files.write(LINK, "record Link(String sibling) {}\n"); // another task's work
+    checkpoints.restorePaths(before, List.of(QR, extra));
+
+    assertThat(files.read(QR)).isEqualTo("class Qr {}\n");
+    assertThat(files.exists(extra)).isFalse();
+    assertThat(files.read(LINK)).isEqualTo("record Link(String sibling) {}\n");
+    assertThatThrownBy(() -> checkpoints.restorePaths(before, List.of("../outside.txt")))
+        .isInstanceOf(RuntimeException.class);
+  }
+
+  @Test
   void checkpointsWorkWithNothingChangedAndRepeatedLabels() {
     GitCheckpointManager checkpoints =
         new GitCheckpointManager(runId -> workspace, Clock.systemUTC());

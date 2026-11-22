@@ -27,6 +27,7 @@ import tools.jackson.dataformat.yaml.YAMLMapper;
  * mode: BROWNFIELD                 # GREENFIELD | BROWNFIELD
  * autonomy: L1_SUPERVISED
  * base: main                       # the git ref the run starts from
+ * workflow: sdlc-standard          # optional: config/workflows/<name>.yml (sdlc-fanout: per task)
  * expect: COMPLETED                # how the run should end
  * decisions:                       # approvals not listed are approved
  *   - { stage: design, decision: REJECT, comment: "use 410 not 404 for expired" }
@@ -45,6 +46,7 @@ public record Scenario(
     RunMode mode,
     AutonomyLevel autonomy,
     String base,
+    String workflow,
     String expect,
     List<ScriptedDecision> decisions,
     Optional<String> answersJson,
@@ -57,7 +59,7 @@ public record Scenario(
   private static final YAMLMapper YAML = YAMLMapper.builder().build();
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final Set<String> KEYS =
-      Set.of("mode", "autonomy", "base", "expect", "decisions", "amend");
+      Set.of("mode", "autonomy", "base", "workflow", "expect", "decisions", "amend");
 
   public Scenario {
     Objects.requireNonNull(id, "id");
@@ -116,6 +118,7 @@ public record Scenario(
         RunMode.valueOf(yml.path("mode").asString("GREENFIELD")),
         AutonomyLevel.valueOf(yml.path("autonomy").asString("L1_SUPERVISED")),
         yml.path("base").asString("main"),
+        workflow(yml, id),
         yml.path("expect").asString("COMPLETED"),
         decisions,
         Files.isRegularFile(answers) ? Optional.of(canonical(read(answers))) : Optional.empty(),
@@ -125,6 +128,14 @@ public record Scenario(
   /** The answers as the API stores them (canonical JSON), so CLI and API runs render one prompt. */
   private static String canonical(String json) {
     return CanonicalJson.write(JSON.readValue(json, Object.class));
+  }
+
+  private static String workflow(JsonNode yml, String id) {
+    String workflow = yml.path("workflow").asString("sdlc-standard");
+    if (!workflow.matches("[a-z0-9][a-z0-9-]{0,63}")) {
+      throw new IllegalArgumentException(id + "/scenario.yml: bad workflow '" + workflow + "'");
+    }
+    return workflow;
   }
 
   private static String required(JsonNode node, String key, String id) {

@@ -23,6 +23,11 @@ public enum EventType {
   REPLAN_TRIGGERED,
   STAGE_INVALIDATED,
   STAGE_SKIPPED,
+  /**
+   * A stage marked {@code expand: tasks} fanned out into one sub-stage per code task (see {@code
+   * TaskExpansion}); audit-only for the projection, read back to rebuild the run's graph.
+   */
+  STAGE_EXPANDED,
   BUDGET_EXCEEDED,
   /** Safe stop begun: nothing new is dispatched; running stages get a grace period. */
   SAFE_STOP_REQUESTED,

@@ -38,6 +38,8 @@ public final class StageContext {
   private final PolicyEngine policies;
   private final Optional<String> fallbackStrategy;
   private final BudgetGuard budget;
+  private final Optional<TaskExpansion.Task> task;
+  private final WriteClaims claims; // null outside a fan-out
   private Usage usage = Usage.NONE;
   private final Set<ArtifactRef> reads = new LinkedHashSet<>();
   private final List<PolicyCheck> checks = new ArrayList<>();
@@ -53,6 +55,34 @@ public final class StageContext {
       PolicyEngine policies,
       Optional<String> fallbackStrategy,
       BudgetGuard budget) {
+    this(
+        run,
+        stageKey,
+        attempt,
+        feedback,
+        artifacts,
+        tools,
+        policies,
+        fallbackStrategy,
+        budget,
+        Optional.empty(),
+        null);
+  }
+
+  StageContext(
+      Run run,
+      String stageKey,
+      int attempt,
+      List<String> feedback,
+      ArtifactStore artifacts,
+      ToolRegistry tools,
+      PolicyEngine policies,
+      Optional<String> fallbackStrategy,
+      BudgetGuard budget,
+      Optional<TaskExpansion.Task> task,
+      WriteClaims claims) {
+    this.task = task;
+    this.claims = claims;
     this.run = run;
     this.stageKey = stageKey;
     this.attempt = attempt;
@@ -102,8 +132,41 @@ public final class StageContext {
         new BudgetGuard(run.budgets(), Usage.NONE));
   }
 
+  /**
+   * As {@link #standalone}, for one task of a fanned-out stage (agent tests). No write conflicts
+   * are tracked.
+   */
+  public static StageContext standaloneTask(
+      Run run,
+      String stageKey,
+      TaskExpansion.Task task,
+      ArtifactStore artifacts,
+      ToolRegistry tools,
+      PolicyEngine policies) {
+    return new StageContext(
+        run,
+        stageKey,
+        1,
+        List.of(),
+        artifacts,
+        tools,
+        policies,
+        Optional.empty(),
+        new BudgetGuard(run.budgets(), Usage.NONE),
+        Optional.of(task),
+        null);
+  }
+
   public Run run() {
     return run;
+  }
+
+  /**
+   * The task this attempt implements, when its stage fanned out ({@code expand: tasks}): only it,
+   * with the rest of the task graph as context. Empty for a stage that runs once for all tasks.
+   */
+  public Optional<TaskExpansion.Task> task() {
+    return task;
   }
 
   public String stageKey() {
@@ -153,6 +216,9 @@ public final class StageContext {
    */
   public Decision authorize(ProposedAction action) {
     Decision decision = policies.evaluate(action, run.autonomyLevel());
+    if (claims != null && action instanceof ProposedAction.FileWrite write && !decision.denied()) {
+      claims.claim(stageKey, write.path()); // before recording: a refused write restores nothing
+    }
     synchronized (this) {
       checks.add(new PolicyCheck(action, decision));
     }

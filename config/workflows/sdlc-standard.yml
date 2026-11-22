@@ -25,7 +25,6 @@ stages:
   - id: implementation
     agent: ImplementationAgent
     dependsOn: [design]
-    expand: tasks                                   # dynamic fan-out per task in task_graph (respects task deps)
     checkpoint: git
     retry: { maxAttempts: 3 }
     timeout: 15m                                    # a 32k-token patch takes minutes to write

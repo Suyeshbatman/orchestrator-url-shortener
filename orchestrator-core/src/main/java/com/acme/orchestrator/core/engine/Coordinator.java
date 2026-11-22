@@ -18,6 +18,7 @@ import static com.acme.orchestrator.core.event.EventType.RUN_FAILED;
 import static com.acme.orchestrator.core.event.EventType.RUN_HALTED;
 import static com.acme.orchestrator.core.event.EventType.RUN_RESUMED;
 import static com.acme.orchestrator.core.event.EventType.SAFE_STOP_REQUESTED;
+import static com.acme.orchestrator.core.event.EventType.STAGE_EXPANDED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_FAILED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_INVALIDATED;
 import static com.acme.orchestrator.core.event.EventType.STAGE_READY;
@@ -137,7 +138,11 @@ import java.util.stream.Stream;
  * <p>Re-planning (see {@link Replanner}): an amended requirement, a rejection, or a re-run that
  * changed an artifact invalidates what depends on it; approvals of invalidated stages are voided.
  *
- * <p>Not yet: task expansion (Phase 5).
+ * <p>Task fan-out: a stage marked {@code expand: tasks} is replaced, when it becomes ready, by one
+ * sub-stage per code task of the task graph ({@link TaskExpansion}, recorded as STAGE_EXPANDED).
+ * Sub-stages are full stages with their own attempts, gates, checkpoints and approvals; a failed
+ * attempt restores only the files it wrote, since its siblings share the workspace. A changed task
+ * graph re-expands the stage once its sub-stages have been invalidated.
  */
 public final class Coordinator implements AutoCloseable {
 
@@ -228,7 +233,16 @@ public final class Coordinator implements AutoCloseable {
   private final WorkflowDefinition workflow;
   private final String runId;
   private final Services services;
-  private final Dag<String> dag;
+
+  /** The workflow's graph with the run's task expansions applied. Coordinator thread only. */
+  private Dag<String> dag;
+
+  /** Stage id → its latest expansion (STAGE_EXPANDED). Coordinator thread only. */
+  private final Map<String, TaskExpansion> expansions = new LinkedHashMap<>();
+
+  /** Files written by fan-out sub-stages, so parallel tasks can't silently overwrite each other. */
+  private final WriteClaims claims = new WriteClaims();
+
   private final Map<String, StageDefinition> stages;
   private final Map<String, Condition> conditions = new LinkedHashMap<>();
   private final BlockingQueue<Command> inbox = new LinkedBlockingQueue<>();
@@ -333,6 +347,9 @@ public final class Coordinator implements AutoCloseable {
       }
     }
     refresh();
+    // a run that fanned out before a restart gets exactly the same graph back from its log
+    expansions.putAll(TaskExpansion.latest(services.events().events(runId)));
+    dag = TaskExpansion.graph(workflow, expansions);
     createdAt = services.events().events(runId).getFirst().timestamp();
     budget = new BudgetGuard(current.run().budgets(), usedSoFar());
     recover();
@@ -385,8 +402,7 @@ public final class Coordinator implements AutoCloseable {
                 .reduce((first, second) -> second)
                 .ifPresent(request -> {
                   approvalRequests.put(key, request.seq());
-                  stages
-                      .get(key)
+                  def(key)
                       .approval()
                       .timeout()
                       .ifPresent(t -> {
@@ -569,22 +585,28 @@ public final class Coordinator implements AutoCloseable {
         }
         return; // a safe stop dispatches nothing new
       }
+      if (reexpandStale()) {
+        continue; // the graph changed
+      }
       List<String> ready = dag.readyNodes(schedulable());
       if (ready.isEmpty()) {
         return; // waiting for agents or approvals
       }
       for (String stageId : ready) {
+        if (expand(stageId)) {
+          break; // the graph changed: compute what is ready again
+        }
         prepare(stageId);
         if (firstWithStatus(StageStatus.FAILED).isPresent()) {
           break; // an entry gate failed: dispatch nothing more
         }
       }
-      // loop again: skips may have made further stages ready
+      // loop again: skips and expansions may have made further stages ready
     }
   }
 
   private void prepare(String stageId) {
-    StageDefinition def = stages.get(stageId);
+    StageDefinition def = def(stageId);
     stageEvent(STAGE_READY, stageId, Actor.SYSTEM, Map.of());
 
     Condition condition = conditions.get(stageId);
@@ -593,7 +615,7 @@ public final class Coordinator implements AutoCloseable {
       return;
     }
     Optional<String> entryFailure =
-        evaluateGates(def, GateContext.Phase.ENTRY, List.of()).failure();
+        evaluateGates(stageId, def, GateContext.Phase.ENTRY, List.of()).failure();
     if (entryFailure.isPresent()) {
       // the inputs are what they are: retrying the stage can't help
       failAttempt(stageId, entryFailure.get(), FailureKind.FATAL, Actor.SYSTEM);
@@ -674,6 +696,12 @@ public final class Coordinator implements AutoCloseable {
                 f -> Map.of("executor", executor.name(), "attempt", attempt, "fallback", f))
             .orElseGet(() -> Map.of("executor", executor.name(), "attempt", attempt)));
 
+    Optional<TaskExpansion.Task> task =
+        TaskExpansion.taskIdOf(stageId)
+            .flatMap(t -> expansions.get(TaskExpansion.stageIdOf(stageId)).task(t));
+    if (task.isPresent()) {
+      claims.begin(stageId);
+    }
     StageContext context =
         new StageContext(
             current.run(),
@@ -684,10 +712,12 @@ public final class Coordinator implements AutoCloseable {
             services.tools(),
             services.policies(),
             fallback,
-            budget);
+            budget,
+            task,
+            task.isPresent() ? claims : null);
     Duration timeout = def.timeout();
     CompletableFuture<AgentResult> result = new CompletableFuture<>();
-    Future<?> task =
+    Future<?> worker =
         workers.submit(() -> {
           try {
             result.complete(agent.execute(context));
@@ -695,12 +725,12 @@ public final class Coordinator implements AutoCloseable {
             result.completeExceptionally(t);
           }
         });
-    running.put(stageId, task);
+    running.put(stageId, worker);
     result
         .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
         .whenComplete((r, error) -> {
-          task.cancel(true); // a timed-out agent is interrupted, not left running
-          running.remove(stageId, task);
+          worker.cancel(true); // a timed-out agent is interrupted, not left running
+          running.remove(stageId, worker);
           if (!closed) {
             inbox.add(outcome(stageId, dispatch, context, timeout, r, error));
           }
@@ -708,6 +738,7 @@ public final class Coordinator implements AutoCloseable {
   }
 
   private void onCompleted(StageCompleted c) {
+    claims.settle(c.stageKey());
     recordUsage(c.stageKey(), c.usage());
     recordChecks(c.stageKey(), c.checks());
     checkDenials(c.checks());
@@ -715,7 +746,7 @@ public final class Coordinator implements AutoCloseable {
       return; // stale: the stage was halted or moved on while the agent ran
     }
     String stageId = c.stageKey();
-    StageDefinition def = stages.get(stageId);
+    StageDefinition def = def(stageId);
     List<String> denied =
         c.checks().stream()
             .filter(check -> check.decision().denied())
@@ -761,7 +792,7 @@ public final class Coordinator implements AutoCloseable {
 
     replanIfOutputChanged(stageId, produced);
 
-    GateOutcome exit = evaluateGates(def, GateContext.Phase.EXIT, produced);
+    GateOutcome exit = evaluateGates(stageId, def, GateContext.Phase.EXIT, produced);
     OptionalInt risk = stageRisk(c);
     if (exit.failure().isPresent() && exit.needsInput()) {
       // e.g. blocking questions: a human answers them (re-run) or accepts the defaults (approve)
@@ -846,14 +877,16 @@ public final class Coordinator implements AutoCloseable {
                 "diffStats",
                 Map.of("filesChanged", d.filesChanged(), "linesChanged", d.linesChanged())));
     def.approval().timeout().ifPresent(t -> payload.put("timeout", t));
-    stageEvent(APPROVAL_REQUESTED, def.id(), Actor.SYSTEM, payload);
+    String key = c.stageKey(); // a sub-stage asks for its own approval
+    stageEvent(APPROVAL_REQUESTED, key, Actor.SYSTEM, payload);
 
     long request = current.lastSeq();
-    approvalRequests.put(def.id(), request);
-    def.approval().timeout().ifPresent(t -> later(t, new ApprovalTimeout(def.id(), request)));
+    approvalRequests.put(key, request);
+    def.approval().timeout().ifPresent(t -> later(t, new ApprovalTimeout(key, request)));
   }
 
   private void onFailed(StageFailed f) {
+    claims.settle(f.stageKey());
     recordUsage(f.stageKey(), f.usage());
     recordChecks(f.stageKey(), f.checks());
     checkDenials(f.checks());
@@ -872,7 +905,7 @@ public final class Coordinator implements AutoCloseable {
         f.checks().stream().anyMatch(check -> check.decision().denied())
             ? FailureKind.DENIED
             : f.kind();
-    failAttempt(f.stageKey(), f.reason(), kind, actorOf(stages.get(f.stageKey())));
+    failAttempt(f.stageKey(), f.reason(), kind, actorOf(def(f.stageKey())));
   }
 
   private void onApproval(ApprovalDecision d) {
@@ -915,7 +948,7 @@ public final class Coordinator implements AutoCloseable {
     if (d.decision() == ApprovalDecision.Decision.APPROVE) {
       stageEvent(APPROVAL_GRANTED, d.stageKey(), d.approver(), payload);
       if (beforeRunning && stopping == null) {
-        dispatch(d.stageKey(), stages.get(d.stageKey())); // READY again: it may run now
+        dispatch(d.stageKey(), def(d.stageKey())); // READY again: it may run now
       }
       return;
     }
@@ -940,7 +973,7 @@ public final class Coordinator implements AutoCloseable {
         Map.of("comment", d.comment()),
         false,
         Optional.empty());
-    StageDefinition def = stages.get(d.stageKey());
+    StageDefinition def = def(d.stageKey());
     int used = current.stages().get(d.stageKey()).attempt();
     int allowed = def.retry().maxAttempts();
     if (stopping != null) {
@@ -973,7 +1006,7 @@ public final class Coordinator implements AutoCloseable {
           "approval of "
               + t.stageKey()
               + " was not given within "
-              + stages.get(t.stageKey()).approval().timeout().orElseThrow(),
+              + def(t.stageKey()).approval().timeout().orElseThrow(),
           Actor.SYSTEM,
           false,
           Map.of("stageId", t.stageKey()));
@@ -1010,7 +1043,7 @@ public final class Coordinator implements AutoCloseable {
 
     Set<String> readers = new LinkedHashSet<>();
     for (Artifact artifact : services.artifacts().byRun(runId)) {
-      if (stages.containsKey(artifact.stageId())
+      if (dag.contains(artifact.stageId())
           && artifact.inputs().stream().anyMatch(r -> r.type().equals(ArtifactTypes.REQUIREMENT))) {
         readers.add(artifact.stageId());
       }
@@ -1285,7 +1318,7 @@ public final class Coordinator implements AutoCloseable {
       stageEvent(
           USAGE_RECORDED,
           stageKey,
-          actorOf(stages.get(stageKey)),
+          actorOf(def(stageKey)),
           Map.of("llmCalls", usage.llmCalls(), "tokens", usage.tokens()));
     }
   }
@@ -1319,20 +1352,28 @@ public final class Coordinator implements AutoCloseable {
    * that had started ROLLED_BACK (running attempts are cancelled); the scheduler runs them again.
    */
   private void onRollback(Rollback r) {
-    if (current.run().status().isTerminal() || !stages.containsKey(r.stageId())) {
+    List<String> keys = keysOf(r.stageId());
+    if (current.run().status().isTerminal() || keys.isEmpty()) {
       LOG.log(System.Logger.Level.WARNING, "ignored rollback to {0}", r.stageId());
       return;
     }
-    Optional<CheckpointRef> checkpoint = latestCheckpoint(r.stageId());
+    // an expanded stage rolls back to the checkpoint before its first task
+    Optional<CheckpointRef> checkpoint =
+        keys.stream()
+            .map(this::latestCheckpointEvent)
+            .flatMap(Optional::stream)
+            .min(java.util.Comparator.comparingLong(Event::seq))
+            .flatMap(e ->
+                e.payloadString("checkpointId")
+                    .map(id -> new CheckpointRef(id, runId, e.stageId().orElseThrow())));
     if (checkpoint.isEmpty()) {
       LOG.log(
           System.Logger.Level.WARNING, "ignored rollback: no checkpoint before {0}", r.stageId());
       return;
     }
     services.checkpoints().restore(checkpoint.get());
-    List<String> affected = new ArrayList<>();
-    affected.add(r.stageId());
-    affected.addAll(dag.downstreamClosure(r.stageId()));
+    Set<String> affected = new LinkedHashSet<>(keys);
+    keys.forEach(k -> affected.addAll(dag.downstreamClosure(k)));
     for (String key : affected) {
       if (StageStateMachine.canTransition(statusOf(key), StageEvent.ROLL_BACK)) {
         inFlight.remove(key);
@@ -1361,13 +1402,39 @@ public final class Coordinator implements AutoCloseable {
    * @return the restored checkpoint's id
    */
   private Optional<String> restoreIfWritten(String stageKey) {
-    StageDefinition def = stages.get(stageKey);
+    StageDefinition def = def(stageKey);
     if (def.checkpoint() == CheckpointKind.NONE || !attemptWroteFiles(stageKey)) {
       return Optional.empty();
     }
     Optional<CheckpointRef> checkpoint = latestCheckpoint(stageKey);
-    checkpoint.ifPresent(ref -> services.checkpoints().restore(ref));
+    if (TaskExpansion.taskIdOf(stageKey).isPresent()) {
+      // siblings write the same workspace in parallel: put back only what this attempt wrote
+      List<String> written = writtenPaths(stageKey);
+      checkpoint.ifPresent(ref -> services.checkpoints().restorePaths(ref, written));
+      claims.release(stageKey);
+    } else {
+      checkpoint.ifPresent(ref -> services.checkpoints().restore(ref));
+    }
     return checkpoint.map(CheckpointRef::id);
+  }
+
+  /** The files the stage's latest attempt was allowed (or asked approval) to write. */
+  private List<String> writtenPaths(String stageKey) {
+    List<String> paths = new ArrayList<>();
+    List<Event> events = stageEvents(stageKey);
+    for (int i = events.size() - 1; i >= 0; i--) {
+      Event e = events.get(i);
+      if (e.type() == STAGE_STARTED) {
+        break;
+      }
+      String action = e.payloadString("action").orElse("");
+      if (e.type() == POLICY_EVALUATED
+          && action.startsWith("file_write ")
+          && !"DENY".equals(e.payloadString("effect").orElse(""))) {
+        paths.add(action.substring("file_write ".length()));
+      }
+    }
+    return paths;
   }
 
   /** Whether the stage's latest attempt was allowed (or asked approval) to write files. */
@@ -1389,11 +1456,15 @@ public final class Coordinator implements AutoCloseable {
   }
 
   private Optional<CheckpointRef> latestCheckpoint(String stageId) {
-    return stageEvents(stageId).stream()
-        .filter(e -> e.type() == CHECKPOINT_CREATED)
-        .reduce((first, second) -> second)
+    return latestCheckpointEvent(stageId)
         .flatMap(e -> e.payloadString("checkpointId"))
         .map(id -> new CheckpointRef(id, runId, stageId));
+  }
+
+  private Optional<Event> latestCheckpointEvent(String stageKey) {
+    return stageEvents(stageKey).stream()
+        .filter(e -> e.type() == CHECKPOINT_CREATED)
+        .reduce((first, second) -> second);
   }
 
   private static Map<String, Object> withRestored(
@@ -1416,7 +1487,7 @@ public final class Coordinator implements AutoCloseable {
    * highImpact} stage, halts it for a human).
    */
   private void failAttempt(String stageKey, String reason, FailureKind kind, Actor actor) {
-    StageDefinition def = stages.get(stageKey);
+    StageDefinition def = def(stageKey);
     StageInstance stage = current.stages().get(stageKey);
     Optional<String> restored = restoreIfWritten(stageKey); // the next attempt starts clean
     if (stopping != null) {
@@ -1476,10 +1547,10 @@ public final class Coordinator implements AutoCloseable {
     payload.put("maxAttempts", def.retry().maxAttempts());
     payload.put("delay", delay);
     restored.ifPresent(id -> payload.put("restoredCheckpoint", id));
-    stageEvent(STAGE_RETRIED, def.id(), Actor.SYSTEM, payload); // → RETRYING
+    stageEvent(STAGE_RETRIED, stage.key(), Actor.SYSTEM, payload); // → RETRYING
     long retry = current.lastSeq();
-    retryTimers.put(def.id(), retry);
-    later(delay, new RetryDue(def.id(), retry));
+    retryTimers.put(stage.key(), retry);
+    later(delay, new RetryDue(stage.key(), retry));
   }
 
   /** Starts the retry if the stage is still waiting for the backoff the timer belongs to. */
@@ -1488,7 +1559,7 @@ public final class Coordinator implements AutoCloseable {
         && statusOf(r.stageKey()) == StageStatus.RETRYING
         && Long.valueOf(r.retry()).equals(retryTimers.get(r.stageKey()))) {
       retryTimers.remove(r.stageKey());
-      dispatch(r.stageKey(), stages.get(r.stageKey()));
+      dispatch(r.stageKey(), def(r.stageKey()));
     }
   }
 
@@ -1531,12 +1602,18 @@ public final class Coordinator implements AutoCloseable {
             loop,
             "maxLoops",
             onFailure.maxLoops()));
-    stageEvent(
-        STAGE_INVALIDATED,
-        target,
-        Actor.SYSTEM,
-        Map.of("reason", "re-run for " + def.id(), "loopFrom", def.id(), "feedback", feedback));
-    invalidateDownstream(target, "upstream " + target + " is re-running (loop " + loop + ")");
+    for (String key : keysOf(target)) { // every task of an expanded target re-runs
+      if (StageStateMachine.canTransition(statusOf(key), StageEvent.INVALIDATE)) {
+        inFlight.remove(key);
+        approvalRequests.remove(key);
+        stageEvent(
+            STAGE_INVALIDATED,
+            key,
+            Actor.SYSTEM,
+            Map.of("reason", "re-run for " + def.id(), "loopFrom", def.id(), "feedback", feedback));
+      }
+      invalidateDownstream(key, "upstream " + target + " is re-running (loop " + loop + ")");
+    }
     return true;
   }
 
@@ -1553,6 +1630,83 @@ public final class Coordinator implements AutoCloseable {
       }
     }
     return false;
+  }
+
+  /** The definition of a stage, or of the stage a sub-stage belongs to. */
+  private StageDefinition def(String stageKey) {
+    StageDefinition def = stages.get(stageKey);
+    return def != null ? def : stages.get(TaskExpansion.stageIdOf(stageKey));
+  }
+
+  /** The graph nodes of a stage: itself, or its sub-stages once it fanned out. */
+  private List<String> keysOf(String stageId) {
+    if (dag.contains(stageId)) {
+      return List.of(stageId);
+    }
+    TaskExpansion x = expansions.get(stageId);
+    return x == null ? List.of() : x.keys().stream().filter(dag::contains).toList();
+  }
+
+  /**
+   * Fans out a ready stage marked {@code expand: tasks} into its code tasks (STAGE_EXPANDED).
+   *
+   * @return true when the graph changed; false when the stage runs as it is (not expandable, no
+   *     task graph, or no code tasks in it)
+   */
+  private boolean expand(String stageId) {
+    StageDefinition def = stages.get(stageId);
+    if (def == null || def.expand().isEmpty()) {
+      return false;
+    }
+    Optional<Artifact> taskGraph =
+        services.artifacts().latestOfType(runId, ArtifactTypes.TASK_GRAPH);
+    if (taskGraph.isEmpty()) {
+      return false;
+    }
+    TaskExpansion previous = expansions.get(stageId);
+    if (previous != null && previous.taskGraphId().equals(taskGraph.get().id())) {
+      return false; // already planned from this task graph: no code tasks, so it runs unexpanded
+    }
+    TaskExpansion x = TaskExpansion.plan(stageId, taskGraph.get());
+    record(x);
+    return !x.tasks().isEmpty();
+  }
+
+  /**
+   * Re-plans a fanned-out stage whose task graph changed (a re-run of the decomposition), once none
+   * of its sub-stages is running or done: invalidated tasks are replaced by the new task list.
+   *
+   * @return true when the graph changed
+   */
+  private boolean reexpandStale() {
+    Optional<Artifact> taskGraph =
+        services.artifacts().latestOfType(runId, ArtifactTypes.TASK_GRAPH);
+    if (taskGraph.isEmpty()) {
+      return false;
+    }
+    for (TaskExpansion x : List.copyOf(expansions.values())) {
+      if (x.tasks().isEmpty() || x.taskGraphId().equals(taskGraph.get().id())) {
+        continue;
+      }
+      boolean idle =
+          x.keys().stream()
+              .map(this::statusOf)
+              .allMatch(s ->
+                  s == StageStatus.PENDING
+                      || s == StageStatus.INVALIDATED
+                      || s == StageStatus.ROLLED_BACK);
+      if (idle) {
+        record(TaskExpansion.plan(x.stageId(), taskGraph.get()));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private void record(TaskExpansion x) {
+    stageEvent(STAGE_EXPANDED, x.stageId(), Actor.SYSTEM, x.payload());
+    expansions.put(x.stageId(), x);
+    dag = TaskExpansion.graph(workflow, expansions);
   }
 
   private List<Event> stageEvents(String stageKey) {
@@ -1582,7 +1736,7 @@ public final class Coordinator implements AutoCloseable {
       stageEvent(
           POLICY_EVALUATED,
           stageKey,
-          actorOf(stages.get(stageKey)),
+          actorOf(def(stageKey)),
           Map.of(
               "action", check.describe(),
               "effect", check.decision().effect(),
@@ -1641,7 +1795,7 @@ public final class Coordinator implements AutoCloseable {
 
   /** Evaluates every gate (each emits GATE_EVALUATED). */
   private GateOutcome evaluateGates(
-      StageDefinition def, GateContext.Phase phase, List<Artifact> produced) {
+      String stageKey, StageDefinition def, GateContext.Phase phase, List<Artifact> produced) {
     List<GateRef> gates = phase == GateContext.Phase.ENTRY ? def.entryGates() : def.exitGates();
     GateContext context =
         new GateContext(
@@ -1661,7 +1815,7 @@ public final class Coordinator implements AutoCloseable {
       }
       stageEvent(
           GATE_EVALUATED,
-          def.id(),
+          stageKey,
           Actor.SYSTEM,
           Map.of(
               "gate", gate.toString(),

@@ -28,7 +28,9 @@ public final class ApiModels {
       @Pattern(regexp = "[a-z0-9][a-z0-9-]{0,63}") String scenarioId,
       @Size(max = 20_000) String requirementText,
       @NotNull RunMode mode,
-      AutonomyLevel autonomyLevel) {}
+      AutonomyLevel autonomyLevel,
+      // a workflow file in the workflows directory, without .yml; default sdlc-standard
+      @Pattern(regexp = "[a-z0-9][a-z0-9-]{0,63}") String workflow) {}
 
   public record AnswersRequest(@NotEmpty @Valid List<Answer> answers) {}
 

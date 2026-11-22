@@ -23,4 +23,14 @@ public interface CheckpointManager {
 
   /** Puts the workspace back exactly as it was when {@code ref} was created. */
   void restore(CheckpointRef ref);
+
+  /**
+   * Puts only {@code paths} back as they were when {@code ref} was created; a path that didn't
+   * exist then is deleted. For one of several tasks writing the same workspace in parallel: a full
+   * restore would also undo the others' work. The default restores everything (right when nothing
+   * else writes the workspace at the same time).
+   */
+  default void restorePaths(CheckpointRef ref, java.util.Collection<String> paths) {
+    restore(ref);
+  }
 }

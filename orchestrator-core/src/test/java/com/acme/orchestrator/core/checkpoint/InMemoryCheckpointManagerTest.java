@@ -25,6 +25,24 @@ class InMemoryCheckpointManagerTest {
   }
 
   @Test
+  void restoringSomePathsLeavesTheOthersAlone() {
+    InMemoryCheckpointManager workspace = new InMemoryCheckpointManager();
+    workspace.write("a.txt", "one");
+    CheckpointRef before = workspace.create("run-1", "impl.T1");
+
+    workspace.write("a.txt", "two");
+    workspace.write("b.txt", "new");
+    workspace.write("c.txt", "a sibling's");
+    workspace.restorePaths(before, java.util.List.of("a.txt", "b.txt"));
+
+    assertThat(workspace.files()).isEqualTo(Map.of("a.txt", "one", "c.txt", "a sibling's"));
+    assertThatThrownBy(
+            () -> workspace.restorePaths(new CheckpointRef("cp-9", "r", "x"), java.util.List.of()))
+        .isInstanceOf(IllegalArgumentException.class);
+    CheckpointManager.NONE.restorePaths(before, java.util.List.of("a.txt")); // nothing to do
+  }
+
+  @Test
   void unknownCheckpointsAreRejected() {
     assertThatThrownBy(
             () -> new InMemoryCheckpointManager().restore(new CheckpointRef("cp-9", "r", "x")))

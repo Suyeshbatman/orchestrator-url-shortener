@@ -3,6 +3,24 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-11-22
+### Added
+- **Task fan-out**, opt-in with the new `config/workflows/sdlc-fanout.yml`. A stage marked
+  `expand: tasks` runs as one sub-stage per code task (`implementation.T1`, …), recorded as the new
+  `STAGE_EXPANDED` event:
+  - tasks run in parallel unless their estimated files overlap, in which case they are chained in
+    task order;
+  - a failed attempt restores only the files it wrote (`CheckpointManager.restorePaths`);
+  - a write that conflicts with a sibling task fails the attempt as a validation error, and it is
+    retried;
+  - loop-backs re-run every task, and a changed task graph re-expands the stage.
+- `workflow` on `POST /api/runs` and in `scenario.yml` (default `sdlc-standard`).
+- The run view and `dag.mmd` show sub-stages.
+
+### Changed
+- `sdlc-standard.yml` no longer carries `expand: tasks`; it was never applied, so runs behave as
+  before.
+
 ## [1.1.0] — 2026-11-22
 ### Added
 - **Sandboxed validation builds** (`DockerSandbox`). Builds of unreviewed model output (live and

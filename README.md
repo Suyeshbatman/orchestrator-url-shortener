@@ -77,6 +77,6 @@ orchestrator-agents/   the SDLC agents, the LLM gateway (live / record / replay)
 orchestrator-app/      REST API, Postgres event store, dashboard, metrics (Spring Boot, :8086)
 orchestrator-cli/      run-scenario, record-fixtures
 coverage-report/       aggregate JaCoCo report
-config/                workflows/sdlc-standard.yml, policies.yml, autonomy.yml
+config/                workflows/sdlc-standard.yml (+ sdlc-fanout.yml), policies.yml, autonomy.yml
 scenarios/             requirement, scenario.yml, fixtures and hand-written replies per scenario
 ```

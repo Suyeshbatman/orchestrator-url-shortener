@@ -84,8 +84,6 @@ public final class ScenarioRunner {
   public record Outcome(
       String runId, RunStatus status, boolean expected, AuditReport audit, Path workDir) {}
 
-  static final String WORKFLOW = "sdlc-standard.yml";
-
   private final Environment env;
   private final PrintStream out;
 
@@ -126,7 +124,8 @@ public final class ScenarioRunner {
     JsonSchemas schemas = new JsonSchemas();
     GateRegistry gates = GateRegistry.standard(schemas);
     WorkflowDefinition workflow =
-        new WorkflowLoader(gates).load(root.resolve("config/workflows").resolve(WORKFLOW));
+        new WorkflowLoader(gates)
+            .load(root.resolve("config/workflows").resolve(scenario.workflow() + ".yml"));
 
     LlmGateway llm = gateway(scenario, mode, work);
     AgentKit kit =
