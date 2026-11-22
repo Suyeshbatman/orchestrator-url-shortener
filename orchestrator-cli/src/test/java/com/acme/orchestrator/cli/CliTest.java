@@ -68,7 +68,7 @@ class CliTest {
   void scenarioFilesAreParsedStrictly() throws Exception {
     Path dir = Files.createDirectories(tmp.resolve("demo"));
     Files.writeString(dir.resolve("requirement.md"), "Do it.\n");
-    Files.writeString(dir.resolve("answers.json"), "{\"answers\":[]}\n");
+    Files.writeString(dir.resolve("answers.json"), "{\n  \"answers\" : [ ]\n}\n"); // canonicalized
     Files.writeString(
         dir.resolve("scenario.yml"),
         """

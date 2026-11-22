@@ -1,6 +1,7 @@
 package com.acme.orchestrator.cli;
 
 import com.acme.orchestrator.core.engine.Command.ApprovalDecision.Decision;
+import com.acme.orchestrator.core.event.CanonicalJson;
 import com.acme.orchestrator.core.model.AutonomyLevel;
 import com.acme.orchestrator.core.model.RunMode;
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.dataformat.yaml.YAMLMapper;
 
 /**
@@ -53,6 +55,7 @@ public record Scenario(
   public record Amendment(String afterApprovalOf, String text) {}
 
   private static final YAMLMapper YAML = YAMLMapper.builder().build();
+  private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final Set<String> KEYS =
       Set.of("mode", "autonomy", "base", "expect", "decisions", "amend");
 
@@ -115,8 +118,13 @@ public record Scenario(
         yml.path("base").asString("main"),
         yml.path("expect").asString("COMPLETED"),
         decisions,
-        Files.isRegularFile(answers) ? Optional.of(read(answers).strip()) : Optional.empty(),
+        Files.isRegularFile(answers) ? Optional.of(canonical(read(answers))) : Optional.empty(),
         amend);
+  }
+
+  /** The answers as the API stores them (canonical JSON), so CLI and API runs render one prompt. */
+  private static String canonical(String json) {
+    return CanonicalJson.write(JSON.readValue(json, Object.class));
   }
 
   private static String required(JsonNode node, String key, String id) {
