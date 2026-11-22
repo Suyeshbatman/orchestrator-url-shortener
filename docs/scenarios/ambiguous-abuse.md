@@ -28,9 +28,17 @@ about 3 minutes). Its log is `.orchestrator/scenarios/ambiguous-abuse/events.jso
 | 102–181 | re-execution | new tasks, impact and design (approved again), then implementation, tests and docs; validation: build succeeded, **277 tests green, 95 % line coverage**; CHG-001 approved |
 | 182–205 | release | final docs, go / no-go, merge into the run's `main` |
 
-**Lineage of the requirement:** spec v1 → answers v1 → spec v2 → requirement v2 (the amendment) →
-spec v3. Each artifact records what it was derived from. The dashboard's lineage view shows the
-chain for a run started through the API. In this CLI run the chain is in the event log above.
+**Lineage of the requirement.** In time order: spec v1 → answers v1 → spec v2 → requirement v2 (the
+amendment) → spec v3. Each artifact records what it was derived from, so the dashboard's lineage
+view of spec v3 (checked in a run started from the dashboard, which matched this one event for
+event) shows:
+```
+requirement v1 ──► spec v1 ──► answers v1 ──┐
+       │                                    ├──► spec v3
+       └──────► requirement v2 (amended) ───┘
+```
+Spec v2 is a sibling, not an ancestor: after the amendment the requirements agent read the amended
+requirement and the answers, not the superseded spec. Its own lineage is requirement v1 + answers v1.
 
 ## The change
 - **Refused destinations** (`UrlValidator`): hosts on `shortener.abuse.blocked-domains` or other URL
