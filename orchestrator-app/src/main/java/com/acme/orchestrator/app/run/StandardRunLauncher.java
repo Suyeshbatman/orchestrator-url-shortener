@@ -80,12 +80,14 @@ public final class StandardRunLauncher implements RunLauncher {
         row.scenarioId()
             .map(id -> props.scenariosPath().resolve(id).resolve("replay"))
             .orElse(props.dataPath().resolve("runs").resolve(run.id()).resolve("replay"));
-    LlmGateway llm =
-        LlmGateways.create(
-            LlmGateways.Config.fromEnvironment(environment, replay),
-            SecretRedactor.fromEnvironment(environment));
+    LlmGateways.Config llmConfig = LlmGateways.Config.fromEnvironment(environment, replay);
+    LlmGateway llm = LlmGateways.create(llmConfig, SecretRedactor.fromEnvironment(environment));
     AgentKit kit =
-        new AgentKit(new LlmClient(llm, schemas), new PromptTemplates(), AgentKit.SHORTENER);
+        new AgentKit(
+            new LlmClient(llm, schemas),
+            new PromptTemplates(),
+            AgentKit.SHORTENER,
+            llmConfig.mode() != LlmGateways.Mode.REPLAY); // live output: reviewed before it builds
 
     Map<String, Agent> agents =
         new HashMap<>(SdlcAgents.standard(kit, policies, ValidationAgent.Settings.SHORTENER));

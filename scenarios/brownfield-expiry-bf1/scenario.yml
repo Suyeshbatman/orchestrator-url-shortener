@@ -4,7 +4,7 @@
 # back; an attempt to skip a failing test outside the path jail (DENY) and the minimal-patch fallback.
 mode: BROWNFIELD
 autonomy: L1_SUPERVISED
-base: main
+base: phase-7                   # the shortener-service code the fixtures were recorded against
 expect: COMPLETED
 decisions:
   - { stage: design, decision: REJECT, comment: "use 410 not 404 for expired" }

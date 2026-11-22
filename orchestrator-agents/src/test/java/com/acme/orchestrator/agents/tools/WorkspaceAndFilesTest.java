@@ -50,6 +50,34 @@ class WorkspaceAndFilesTest {
             });
   }
 
+  @Test
+  void writesOfUnreviewedModelOutputAreMarkedForThePolicies() {
+    List<ProposedAction> seen = new java.util.ArrayList<>();
+    FileTool live =
+        new FileTool(
+            workspace,
+            action -> {
+              seen.add(action);
+              return POLICIES.evaluate(action, AutonomyLevel.L1_SUPERVISED);
+            },
+            true);
+
+    live.write("shortener-service/src/main/java/com/acme/shortener/Live.java", "class Live {}\n");
+    files.write("shortener-service/src/main/java/com/acme/shortener/Fixture.java", "class F {}\n");
+
+    assertThat(seen)
+        .singleElement()
+        .isEqualTo(
+            new ProposedAction.FileWrite(
+                "shortener-service/src/main/java/com/acme/shortener/Live.java",
+                "class Live {}\n",
+                true));
+    assertThat(asked.getLast())
+        .isEqualTo(
+            new ProposedAction.FileWrite(
+                "shortener-service/src/main/java/com/acme/shortener/Fixture.java", "class F {}\n"));
+  }
+
   // ---- workspace ------------------------------------------------------------------------------
 
   @Test

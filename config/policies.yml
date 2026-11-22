@@ -24,6 +24,12 @@ policies:
     max_files_changed: 25
     max_lines_changed: 1200
     effect: REQUIRE_APPROVAL
+  - id: CHG-005-unreviewed-code
+    on: file_write
+    paths: ["shortener-service/**"]
+    when: unreviewed        # live model output: validation builds and runs it, so a human reviews it first
+    effect: REQUIRE_APPROVAL
+    message: "Model-written code is reviewed before the build runs it."
   - id: CHG-004-security-config
     on: file_write
     paths: ["**/config/Security*.java", "**/application*.yml", "**/application*.yaml"]

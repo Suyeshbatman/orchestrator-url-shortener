@@ -4,7 +4,7 @@
 # (spec v3), the design approval is voided and everything downstream re-executes.
 mode: BROWNFIELD
 autonomy: L1_SUPERVISED
-base: main
+base: phase-7                   # the shortener-service code the fixtures were recorded against
 expect: COMPLETED
 decisions: []
 amend:

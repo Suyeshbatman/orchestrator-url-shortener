@@ -62,7 +62,10 @@ public final class TestAuthoringAgent extends LlmAgent {
 
   @Override
   protected void after(StageContext ctx, JsonNode tests) {
-    Patches.apply(new FileTool(ctx.tools().require(Workspace.class), Authorizer.of(ctx)), tests);
+    Patches.apply(
+        new FileTool(
+            ctx.tools().require(Workspace.class), Authorizer.of(ctx), kit.unreviewedOutput()),
+        tests);
   }
 
   @Override

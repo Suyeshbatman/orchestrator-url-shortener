@@ -185,9 +185,14 @@ public final class PolicyLoader {
     }
 
     private Policy pathRule(String id, Optional<String> message) {
-      keys("paths", "effect");
+      keys("paths", "effect", "when");
       Effect effect = effect("effect");
-      return new Policy.PathRule(id, globs("paths"), effect, weight(effect), message);
+      String when = text("when");
+      if (when != null && !when.equals("unreviewed")) {
+        problem("'when' must be 'unreviewed', was '" + when + "'");
+      }
+      return new Policy.PathRule(
+          id, globs("paths"), effect, weight(effect), message, "unreviewed".equals(when));
     }
 
     private Policy allowlist(String id, Optional<String> message) {

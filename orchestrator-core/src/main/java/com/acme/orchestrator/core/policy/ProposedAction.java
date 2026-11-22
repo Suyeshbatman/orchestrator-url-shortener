@@ -5,11 +5,21 @@ import java.util.Objects;
 /** Something an agent wants to do, checked by the {@link PolicyEngine} before it happens. */
 public sealed interface ProposedAction {
 
-  /** Write {@code content} to {@code path} (relative to the repository root). */
-  record FileWrite(String path, String content) implements ProposedAction {
+  /**
+   * Write {@code content} to {@code path} (relative to the repository root).
+   *
+   * @param unreviewed the content is model output no human has seen yet (a live model, not a
+   *     reviewed fixture or a hand-written reply); code like that is built and run by validation
+   */
+  record FileWrite(String path, String content, boolean unreviewed) implements ProposedAction {
     public FileWrite {
       Objects.requireNonNull(path, "path");
       Objects.requireNonNull(content, "content");
+    }
+
+    /** Reviewed (or human-written) content. */
+    public FileWrite(String path, String content) {
+      this(path, content, false);
     }
   }
 

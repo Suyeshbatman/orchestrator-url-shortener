@@ -120,7 +120,11 @@ public final class ScenarioRunner {
 
     LlmGateway llm = gateway(scenario, mode, work);
     AgentKit kit =
-        new AgentKit(new LlmClient(llm, schemas), new PromptTemplates(), AgentKit.SHORTENER);
+        new AgentKit(
+            new LlmClient(llm, schemas),
+            new PromptTemplates(),
+            AgentKit.SHORTENER,
+            mode == LlmMode.RECORD || mode == LlmMode.LIVE);
     Map<String, Agent> agents =
         new HashMap<>(SdlcAgents.standard(kit, policies, ValidationAgent.Settings.SHORTENER));
     agents.put(MergeToMainAction.NAME, new MergeToMainAction(workspaces::create, "main", clock));

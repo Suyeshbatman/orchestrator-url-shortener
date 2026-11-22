@@ -27,6 +27,14 @@ stale failures from the earlier run would fail the new one.
   event or artifact stores, or an in-memory adapter, and it never uses Spring.
 - Shortener controllers (`@RestController`) never touch a repository, JDBC or Redis directly.
 
+**Fixtures are pinned.** A fixture matches only the exact prompt it was recorded with, and the
+prompts include a map of `shortener-service` and its `pom.xml`. So each `scenario.yml` names its
+base as `base: phase-7`, the tag whose `shortener-service` code the fixtures were recorded against,
+and not `main`, which moves. A deliberate change to the shortener that should reach the scenarios
+means re-recording them (`record-fixtures <id>` or `run-scenario <id> --llm record`) and moving the
+pin. To run a scenario from the dashboard, the source repository's `main` must be at that commit
+too.
+
 **End to end (`ScenariosE2E`).** Each scenario starts from a bare copy of this repository, reset to
 the scenario's base commit, and the test plays its humans over the API. That means answers,
 approvals, the design rejection in 7.2 and the amendment in 7.3. Each test checks that:

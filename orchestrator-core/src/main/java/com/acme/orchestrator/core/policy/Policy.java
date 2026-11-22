@@ -56,11 +56,26 @@ public sealed interface Policy {
   }
 
   /** {@code on: file_write} + {@code paths}: writing a matching path. */
-  record PathRule(String id, List<Glob> paths, Effect effect, int weight, Optional<String> message)
+  /**
+   * @param unreviewedOnly {@code when: unreviewed}: applies only to writes of model output no human
+   *     has reviewed yet
+   */
+  record PathRule(
+      String id,
+      List<Glob> paths,
+      Effect effect,
+      int weight,
+      Optional<String> message,
+      boolean unreviewedOnly)
       implements Policy {
     public PathRule {
       Objects.requireNonNull(id, "id");
       paths = List.copyOf(paths);
+    }
+
+    public PathRule(
+        String id, List<Glob> paths, Effect effect, int weight, Optional<String> message) {
+      this(id, paths, effect, weight, message, false);
     }
 
     Optional<Glob> match(String path) {

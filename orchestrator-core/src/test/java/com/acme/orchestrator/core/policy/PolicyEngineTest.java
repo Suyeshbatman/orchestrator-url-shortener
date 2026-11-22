@@ -66,6 +66,7 @@ class PolicyEngineTest {
             "CHG-001-schema-migration",
             "CHG-002-dependency-change",
             "CHG-003-blast-radius",
+            "CHG-005-unreviewed-code",
             "CHG-004-security-config",
             "CMP-001-pii",
             "CMD-001-command-allowlist");
@@ -169,6 +170,30 @@ class PolicyEngineTest {
         .containsExactly(tuple("CHG-002-dependency-change", Effect.REQUIRE_APPROVAL));
     // the root POM (which also lists the orchestrator modules) stays out of reach
     assertThat(write("pom.xml").effect()).isEqualTo(Effect.DENY);
+  }
+
+  @Test
+  void chg005UnreviewedModelCodeIsReviewedBeforeItBuilds() {
+    Decision live =
+        ENGINE.evaluate(new FileWrite(SRC + "X.java", "class X {}\n", true), L1_SUPERVISED);
+
+    assertThat(live.effect()).isEqualTo(Effect.REQUIRE_APPROVAL);
+    assertThat(live.matchedPolicies())
+        .extracting(PolicyMatch::policyId)
+        .containsExactly("CHG-005-unreviewed-code");
+    // replayed fixtures and hand-written replies were reviewed when they were committed
+    assertThat(write(SRC + "X.java").effect()).isEqualTo(Effect.ALLOW);
+    // docs are not built, so unreviewed docs need no extra approval
+    assertThat(
+            ENGINE.evaluate(new FileWrite("docs/api/x.md", "# x\n", true), L1_SUPERVISED).effect())
+        .isEqualTo(Effect.ALLOW);
+    // even at L2: running model-written code is never automatic
+    assertThat(
+            ENGINE
+                .evaluate(
+                    new FileWrite(SRC + "X.java", "class X {}\n", true), AutonomyLevel.L2_TRUSTED)
+                .effect())
+        .isEqualTo(Effect.REQUIRE_APPROVAL);
   }
 
   @Test

@@ -86,7 +86,8 @@ public final class PolicyEngine {
           case FileWrite write -> {
             normalize(write.path())
                 .ifPresentOrElse(
-                    path -> checkPath(path, matches), () -> matches.invalidPath(write.path()));
+                    path -> checkPath(path, write.unreviewed(), matches),
+                    () -> matches.invalidPath(write.path()));
             yield Math.min(10, (int) write.content().lines().count() / 100);
           }
           case Diff diff -> {
@@ -94,7 +95,7 @@ public final class PolicyEngine {
             for (String raw : parsed.paths()) {
               normalize(raw)
                   .ifPresentOrElse(
-                      path -> checkPath(path, matches), () -> matches.invalidPath(raw));
+                      path -> checkPath(path, false, matches), () -> matches.invalidPath(raw));
             }
             checkContent(parsed, matches);
             int files = Math.max(diff.filesChanged(), parsed.paths().size());
@@ -151,12 +152,13 @@ public final class PolicyEngine {
 
   // ---- checks ---------------------------------------------------------------------------------
 
-  private void checkPath(String path, Matches matches) {
+  /** {@code unreviewed}: the content is model output no human has seen (writes only). */
+  private void checkPath(String path, boolean unreviewed, Matches matches) {
     for (Policy policy : policies.policies()) {
       switch (policy) {
         case Policy.PathJail jail when !jail.allows(path) ->
             matches.add(jail, "write outside the allowed paths", path);
-        case Policy.PathRule rule ->
+        case Policy.PathRule rule when !rule.unreviewedOnly() || unreviewed ->
             rule.match(path)
                 .ifPresent(glob ->
                     matches.add(rule, "write to a protected path", path + " (" + glob + ")"));

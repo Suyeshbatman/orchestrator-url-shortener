@@ -127,7 +127,17 @@ class ScenariosE2E {
         .pollInterval(Duration.ofSeconds(1))
         .until(human::actUntilDone);
 
-    assertThat(human.status).as(id + " ends as the scenario expects").isEqualTo(scenario.expect());
+    List<String> failures = new ArrayList<>();
+    call(get("/api/runs/" + runId + "/events"), OPERATOR, 200)
+        .forEach(e -> {
+          if (e.path("type").asString().endsWith("_FAILED")) {
+            failures.add(
+                e.path("stageId").asString("run") + ": " + e.path("payload").path("reason"));
+          }
+        });
+    assertThat(human.status)
+        .as(id + " ends as the scenario expects; failures: " + failures)
+        .isEqualTo(scenario.expect());
     List<String> types = new ArrayList<>();
     call(get("/api/runs/" + runId + "/events"), OPERATOR, 200)
         .forEach(e -> types.add(e.path("type").asString()));

@@ -40,7 +40,10 @@ public final class DocsAgent extends LlmAgent {
 
   @Override
   protected void after(StageContext ctx, JsonNode docs) {
-    Patches.apply(new FileTool(ctx.tools().require(Workspace.class), Authorizer.of(ctx)), docs);
+    Patches.apply(
+        new FileTool(
+            ctx.tools().require(Workspace.class), Authorizer.of(ctx), kit.unreviewedOutput()),
+        docs);
   }
 
   @Override

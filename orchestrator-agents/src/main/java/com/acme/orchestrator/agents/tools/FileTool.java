@@ -31,10 +31,20 @@ public final class FileTool {
 
   private final PathGuard guard;
   private final Authorizer authorizer;
+  private final boolean unreviewed;
 
   public FileTool(Workspace workspace, Authorizer authorizer) {
+    this(workspace, authorizer, false);
+  }
+
+  /**
+   * @param unreviewed what this tool writes is model output no human has seen yet, so policies can
+   *     ask for a review before anything builds it
+   */
+  public FileTool(Workspace workspace, Authorizer authorizer, boolean unreviewed) {
     this.guard = new PathGuard(workspace.root());
     this.authorizer = Objects.requireNonNull(authorizer, "authorizer");
+    this.unreviewed = unreviewed;
   }
 
   public String read(String path) {
@@ -105,7 +115,8 @@ public final class FileTool {
   public Decision write(String path, String content) {
     Path file = guard.resolve(path);
     String relative = guard.relative(file);
-    Decision decision = authorizer.authorize(new ProposedAction.FileWrite(relative, content));
+    Decision decision =
+        authorizer.authorize(new ProposedAction.FileWrite(relative, content, unreviewed));
     if (decision.effect() == Effect.DENY) {
       throw new PolicyDeniedException("writing " + relative, decision);
     }
@@ -122,7 +133,8 @@ public final class FileTool {
   public Decision delete(String path) {
     Path file = guard.resolve(path);
     String relative = guard.relative(file);
-    Decision decision = authorizer.authorize(new ProposedAction.FileWrite(relative, ""));
+    Decision decision =
+        authorizer.authorize(new ProposedAction.FileWrite(relative, "", unreviewed));
     if (decision.effect() == Effect.DENY) {
       throw new PolicyDeniedException("deleting " + relative, decision);
     }

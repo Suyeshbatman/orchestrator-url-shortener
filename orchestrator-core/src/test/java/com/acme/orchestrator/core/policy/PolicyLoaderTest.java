@@ -82,6 +82,7 @@ class PolicyLoaderTest {
                   - { on: diff }
                   - { id: G, on: file_write, effect: DENY }
                   - { id: H, on: file_write, allow_paths: ["x"] }
+                  - { id: I, on: file_write, paths: ["x"], when: always, effect: DENY }
                 """,
                 AUTONOMY))
         .containsExactly(
@@ -95,7 +96,8 @@ class PolicyLoaderTest {
             "policies.yml: policies[6] (A): duplicate policy id A",
             "policies.yml: policies[7]: 'id' is required",
             "policies.yml: policies[8] (G): a file_write rule needs allow_paths or paths",
-            "policies.yml: policies[9] (H): 'effect_outside' is required");
+            "policies.yml: policies[9] (H): 'effect_outside' is required",
+            "policies.yml: policies[10] (I): 'when' must be 'unreviewed', was 'always'");
   }
 
   @Test

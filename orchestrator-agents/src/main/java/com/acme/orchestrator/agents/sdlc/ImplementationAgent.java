@@ -93,7 +93,8 @@ public final class ImplementationAgent extends LlmAgent {
     return ctx.fallbackStrategy().filter(MINIMAL_PATCH::equals).isPresent();
   }
 
-  private static FileTool files(StageContext ctx) {
-    return new FileTool(ctx.tools().require(Workspace.class), Authorizer.of(ctx));
+  private FileTool files(StageContext ctx) {
+    return new FileTool(
+        ctx.tools().require(Workspace.class), Authorizer.of(ctx), kit.unreviewedOutput());
   }
 }
