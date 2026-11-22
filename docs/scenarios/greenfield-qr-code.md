@@ -33,7 +33,7 @@ flowchart LR
 | impact_analysis | **skipped**: the run is GREENFIELD | — |
 | design | 5 components, 3 risks, risk score 40; no schema change, no new config | architecture sign-off |
 | implementation ‖ tests ‖ docs | ran in parallel from the approved design. Implementation wrote `shortener-service/pom.xml` (ZXing core 3.5.3) | **CHG-002**: the dependency change waited for approval |
-| validation | `mvn -q -pl shortener-service -am verify`: build succeeded, **278 tests green, line coverage 94.8 %** (gate 80 %), no DENY | CHG-002 again on the whole diff (13 files, 443 lines) |
+| validation | `mvn -q -pl shortener-service -am verify`: build succeeded, **278 tests green, line coverage 95 %** (gate 80 %), no DENY | CHG-002 again on the whole diff (13 files, 443 lines) |
 | docs_finalize | API note and ADR-0005 updated with the validated numbers | — |
 | release_readiness | 7/7 checklist items done; 1 open issue stated plainly (BF-1) | go / no-go |
 | publish | merged `agent/scn-greenfield-qr-code` into the run's `main` | approved **before** the merge runs |

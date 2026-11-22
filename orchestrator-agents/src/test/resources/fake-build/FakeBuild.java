@@ -10,6 +10,10 @@ class FakeBuild {
     if (args.length > 0) {
       System.out.println("[INFO] Compiling 42 source files");
       System.out.println("[ERROR] QrController.java:[3,1] ';' expected");
+      System.out.println(
+          "[ERROR] Tests run: 5, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 7.636 s <<< FAILURE!"
+              + " -- in com.acme.QrIT");
+      System.out.println("[ERROR] com.acme.QrIT.works -- Time elapsed: 0.103 s <<< FAILURE!");
       System.out.println("[INFO] BUILD FAILURE");
       System.exit(1);
     }

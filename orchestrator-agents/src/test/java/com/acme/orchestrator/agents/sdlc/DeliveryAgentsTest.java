@@ -160,6 +160,34 @@ class DeliveryAgentsTest {
   }
 
   @Test
+  void theTestsTheImpactReportNamesAreShownSoTheyCanBeUpdated() throws Exception {
+    String pinned = "shortener-service/src/test/java/com/acme/shortener/link/PinTest.java";
+    Path file = workspace.root().resolve(pinned);
+    Files.createDirectories(file.getParent());
+    Files.writeString(file, "class PinTest { /* expects the old behaviour */ }");
+    h.input(
+        "impact_analysis",
+        ArtifactTypes.IMPACT_REPORT,
+        "{\"testsToUpdate\":[\"" + pinned + "\",\"not a path\"]}");
+
+    new TestAuthoringAgent(h.recording(replay, fixture("test_patch")))
+        .execute(ctx("test_authoring"));
+
+    assertThat(h.sent.getFirst().userPrompt())
+        .contains("### " + pinned)
+        .contains("expects the old behaviour")
+        .doesNotContain("None (no impact analysis ran).");
+  }
+
+  @Test
+  void withoutAnImpactReportThereAreNoExistingTestsToUpdate() throws Exception {
+    new TestAuthoringAgent(h.recording(replay, fixture("test_patch")))
+        .execute(ctx("test_authoring"));
+
+    assertThat(h.sent.getFirst().userPrompt()).contains("None (no impact analysis ran).");
+  }
+
+  @Test
   void testFilesOutsideTheTestTreeFailTheSchema() {
     String wrongPlace =
         "{\"summary\":\"t\",\"files\":[{\"path\":\""

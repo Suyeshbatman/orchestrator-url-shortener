@@ -1,0 +1,66 @@
+{
+  "approach": "Add a nullable expires_at column (Flyway V3) and an expiresAt component to Link. LinkService.create validates expiresAt or ttlSeconds (InvalidExpiryException: 400 invalid-expiry) and stores the expiry. The cache entry CacheEntry.Found carries expiresAt, so resolve compares it with the injected Clock on every hit, whichever level answered, and needs no database read. An expired link answers 410 Gone: resolve throws LinkExpiredException, mapped to 410 /problems/link-expired (as the reviewer asked, and as FR-3 says), while unknown and deleted codes stay 404. LinkCache gains putExpiring(code, url, expiresAt, timeLeft); TieredLinkCache caps the Redis TTL at the time left. RedisLinkCache stores E:<epoch millis>:<url> for expiring links. BF-1: LinkService.delete evicts the code from L1 and L2 after the transaction commits.",
+  "alternativesConsidered": [
+    {
+      "option": "404 for expired links, like deleted ones (design v1)",
+      "whyNot": "Rejected in review: clients and crawlers should learn the link is gone for good (410), and the requirement asks for 410."
+    },
+    {
+      "option": "An EXPIRED status set by a scheduled job",
+      "whyNot": "Links would keep redirecting until the job runs, and the job adds a moving part; comparing a timestamp on read is exact."
+    },
+    {
+      "option": "Evict on delete before the commit",
+      "whyNot": "A concurrent redirect could reload the still-active row and re-cache it."
+    },
+    {
+      "option": "Cross-instance L1 invalidation with Redis pub/sub",
+      "whyNot": "More moving parts than the requirement needs; the 5-minute L1 TTL bounds the staleness. Follow-up."
+    }
+  ],
+  "apiChanges": "paths:\n  /api/v1/links:\n    post:\n      requestBody:\n        content:\n          application/json:\n            schema:\n              properties:\n                expiresAt: { type: string, format: date-time, nullable: true, description: 'in the future, at most ten years ahead' }\n                ttlSeconds: { type: integer, format: int64, minimum: 1, maximum: 315360000, nullable: true, description: 'instead of expiresAt' }\n      responses:\n        '400': { description: 'invalid-expiry: both given, or out of range' }\n  /api/v1/links/{code}:\n    get:\n      responses:\n        '200': { description: 'LinkResponse gains expiresAt (absent: never expires)' }\n  /{code}:\n    get:\n      responses:\n        '404': { description: 'link-not-found: unknown or deleted (at once)' }\n        '410': { description: 'link-expired: the expiry has passed' }\n",
+  "schemaChanges": "ALTER TABLE link ADD COLUMN expires_at TIMESTAMPTZ;",
+  "components": [
+    {
+      "name": "V3__link_expiry.sql",
+      "responsibility": "Nullable expires_at; existing links keep NULL (never expire)."
+    },
+    {
+      "name": "link.Link / CreateLinkRequest / LinkResponse",
+      "responsibility": "expiresAt on the entity and in the API; the two-argument CreateLinkRequest constructor stays."
+    },
+    {
+      "name": "link.LinkService",
+      "responsibility": "Validates the expiry (InvalidExpiryException), throws LinkExpiredException (410) on resolve past the expiry, evicts the cache after a delete commits (BF-1)."
+    },
+    {
+      "name": "cache.CacheEntry.Found / LinkCache / TieredLinkCache / RedisLinkCache",
+      "responsibility": "Entries carry expiresAt; putExpiring caps the Redis TTL at the time left; Redis value E:<millis>:<url>."
+    },
+    {
+      "name": "Configuration",
+      "responsibility": "No new configuration properties: the limits (1 s to ten years) are part of the API contract."
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Schema migration on the link table",
+      "likelihood": "LOW",
+      "impact": "HIGH",
+      "mitigation": "Adding a nullable column without a default is a metadata-only change in Postgres 16; no backfill."
+    },
+    {
+      "risk": "A cache level serves an expired link",
+      "likelihood": "MED",
+      "impact": "MED",
+      "mitigation": "The expiry travels with the cache entry and is checked on every hit; Redis TTL capped at the time left."
+    },
+    {
+      "risk": "Other instances' L1 serves a deleted link",
+      "likelihood": "MED",
+      "impact": "LOW",
+      "mitigation": "Bounded by the 5-minute L1 TTL; documented; pub/sub invalidation is a follow-up."
+    }
+  ],
+  "rolloutPlan": "Migration V3 runs on startup (additive, safe for old instances). Deploy the service; old and new instances can share Redis. No flag: links without an expiry behave as before. Rollback: redeploy the previous version; the column stays and is ignored."
+}

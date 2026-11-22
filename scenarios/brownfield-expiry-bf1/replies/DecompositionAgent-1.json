@@ -1,0 +1,130 @@
+{
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Flyway V3: nullable link.expires_at",
+      "type": "MIGRATION",
+      "requirementIds": [
+        "FR-1"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "shortener-service/src/main/resources/db/migration/V3__link_expiry.sql"
+      ],
+      "risk": "HIGH"
+    },
+    {
+      "id": "T2",
+      "title": "Expiry on Link and the create request and response; validation and 400 invalid-expiry",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-1",
+        "FR-2",
+        "FR-5"
+      ],
+      "dependsOn": [
+        "T1"
+      ],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/link/Link.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/CreateLinkRequest.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkResponse.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkService.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/InvalidExpiryException.java"
+      ],
+      "risk": "HIGH"
+    },
+    {
+      "id": "T3",
+      "title": "Expiry-aware cache: entries carry expiresAt, Redis TTL capped at the time left, old value format kept",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-3",
+        "NFR-1",
+        "NFR-2",
+        "NFR-3"
+      ],
+      "dependsOn": [
+        "T2"
+      ],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/cache/CacheEntry.java",
+        "shortener-service/src/main/java/com/acme/shortener/cache/LinkCache.java",
+        "shortener-service/src/main/java/com/acme/shortener/cache/TieredLinkCache.java",
+        "shortener-service/src/main/java/com/acme/shortener/cache/RedisLinkCache.java"
+      ],
+      "risk": "MED"
+    },
+    {
+      "id": "T4",
+      "title": "Redirect answers 410 link-expired from every level",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-3"
+      ],
+      "dependsOn": [
+        "T3"
+      ],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkService.java",
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkExpiredException.java",
+        "shortener-service/src/main/java/com/acme/shortener/api/ProblemTypes.java",
+        "shortener-service/src/main/java/com/acme/shortener/api/ProblemDetailsHandler.java"
+      ],
+      "risk": "MED"
+    },
+    {
+      "id": "T5",
+      "title": "BF-1: evict the cache after a delete commits",
+      "type": "CODE",
+      "requirementIds": [
+        "FR-4"
+      ],
+      "dependsOn": [
+        "T2"
+      ],
+      "estimatedFiles": [
+        "shortener-service/src/main/java/com/acme/shortener/link/LinkService.java"
+      ],
+      "risk": "MED"
+    },
+    {
+      "id": "T6",
+      "title": "Tests: expiry end to end, BF-1 regression (update the tests that pin BF-1)",
+      "type": "TEST",
+      "requirementIds": [
+        "FR-1",
+        "FR-2",
+        "FR-3",
+        "FR-4",
+        "FR-5",
+        "NFR-1",
+        "NFR-2"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "shortener-service/src/test/java/com/acme/shortener/link/LinkExpiryIT.java",
+        "shortener-service/src/test/java/com/acme/shortener/link/LinkServiceTest.java",
+        "shortener-service/src/test/java/com/acme/shortener/link/LinkApiIT.java"
+      ],
+      "risk": "LOW"
+    },
+    {
+      "id": "T7",
+      "title": "Docs: API note, ADR, known-issues update",
+      "type": "DOC",
+      "requirementIds": [
+        "FR-1",
+        "FR-3",
+        "FR-4"
+      ],
+      "dependsOn": [],
+      "estimatedFiles": [
+        "docs/api/link-expiry.md",
+        "docs/adr/0005-link-expiry-and-cache-eviction.md",
+        "docs/known-issues.md"
+      ],
+      "risk": "LOW"
+    }
+  ]
+}

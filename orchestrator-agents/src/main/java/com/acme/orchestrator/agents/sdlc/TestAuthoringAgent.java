@@ -5,7 +5,10 @@ import com.acme.orchestrator.agents.tools.FileTool;
 import com.acme.orchestrator.agents.tools.Workspace;
 import com.acme.orchestrator.core.engine.StageContext;
 import com.acme.orchestrator.core.model.ArtifactTypes;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import tools.jackson.databind.JsonNode;
@@ -28,7 +31,33 @@ public final class TestAuthoringAgent extends LlmAgent {
     return Map.of(
         "spec", content(ctx, ArtifactTypes.REQUIREMENTS_SPEC),
         "design", content(ctx, ArtifactTypes.DESIGN_DOC),
-        "codebase", codebase(ctx));
+        "codebase", codebase(ctx),
+        "existingTests", existingTests(ctx));
+  }
+
+  /**
+   * The current content of the existing tests the impact report says must change (brownfield): they
+   * pin behaviour the specification changes, so they are part of the contract to rewrite.
+   */
+  private static String existingTests(StageContext ctx) {
+    Optional<String> impact = ctx.artifact(ArtifactTypes.IMPACT_REPORT).map(a -> a.contentJson());
+    if (impact.isEmpty()) {
+      return "None (no impact analysis ran).";
+    }
+    List<String> paths = new ArrayList<>();
+    JSON.readTree(impact.get())
+        .path("testsToUpdate")
+        .forEach(t -> {
+          String path = t.asString("").strip();
+          if (path.startsWith(TARGET_MODULE + "/src/test/")) {
+            paths.add(path);
+          }
+        });
+    if (paths.isEmpty()) {
+      return "None (the impact report lists no existing tests to update).";
+    }
+    return Patches.currentContent(
+        new FileTool(ctx.tools().require(Workspace.class), Authorizer.of(ctx)), paths);
   }
 
   @Override

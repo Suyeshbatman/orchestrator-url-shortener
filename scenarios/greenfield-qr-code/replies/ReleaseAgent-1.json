@@ -8,7 +8,7 @@
     {
       "item": "Coverage at or above the gate (80 %)",
       "status": "DONE",
-      "evidence": "validation_report: line coverage 0.948"
+      "evidence": "validation_report: line coverage 0.95"
     },
     {
       "item": "Policy scan clean",
@@ -51,5 +51,5 @@
   "openIssues": [
     "BF-1 (redirect cache not evicted on delete) is unchanged: a deleted link can still redirect from cache until its TTL expires, although its QR endpoint returns 404 at once. Fixed in the brownfield scenario."
   ],
-  "finalEngineeringSummary": "## QR codes for short links\n\n**What changed.** A new `qr` feature package in `shortener-service`:\n- `QrCodeController`: public `GET /{code}/qr?size=`, redirect rate limit, `Cache-Control: max-age=0, private`.\n- `QrCodeService`: serves only `ACTIVE` links, read from the database (not the redirect cache, see ADR-0005); size 128-1024, default 256.\n- `QrCodeEncoder`: ZXing core, error correction M, quiet zone 1, 1-bit PNG, deterministic.\n- New problem type `/problems/invalid-qr-size`; new dependency `com.google.zxing:core` 3.5.3.\n\n**Why.** The QR code encodes the short URL so scans are counted and stop working when the link is deleted; the database check makes deletion take effect immediately despite BF-1.\n\n**How it was verified.** `mvn -q -pl shortener-service -am verify`: build succeeded, 278 tests green, 94.8 % line coverage. `QrCodeIT` decodes the PNGs and covers AC-1 to AC-10, including deletion after a QR code was served."
+  "finalEngineeringSummary": "## QR codes for short links\n\n**What changed.** A new `qr` feature package in `shortener-service`:\n- `QrCodeController`: public `GET /{code}/qr?size=`, redirect rate limit, `Cache-Control: max-age=0, private`.\n- `QrCodeService`: serves only `ACTIVE` links, read from the database (not the redirect cache, see ADR-0005); size 128-1024, default 256.\n- `QrCodeEncoder`: ZXing core, error correction M, quiet zone 1, 1-bit PNG, deterministic.\n- New problem type `/problems/invalid-qr-size`; new dependency `com.google.zxing:core` 3.5.3.\n\n**Why.** The QR code encodes the short URL so scans are counted and stop working when the link is deleted; the database check makes deletion take effect immediately despite BF-1.\n\n**How it was verified.** `mvn -q -pl shortener-service -am verify`: build succeeded, 278 tests green, 95 % line coverage. `QrCodeIT` decodes the PNGs and covers AC-1 to AC-10, including deletion after a QR code was served."
 }

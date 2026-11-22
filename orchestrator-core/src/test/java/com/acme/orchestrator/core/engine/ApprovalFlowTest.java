@@ -273,6 +273,59 @@ class ApprovalFlowTest {
   }
 
   @Test
+  void aPolicyDenyGoesStraightToTheFallbackWithTheDenialAsFeedback() throws Exception {
+    List<List<String>> feedback = new java.util.concurrent.CopyOnWriteArrayList<>();
+    Agent agent =
+        ctx -> {
+          feedback.add(ctx.feedback());
+          String path =
+              ctx.fallbackStrategy().isEmpty()
+                  ? "README.md" // outside the path jail
+                  : "shortener-service/src/main/java/Fix.java";
+          if (ctx.authorize(new ProposedAction.FileWrite(path, "x")).denied()) {
+            throw new IllegalStateException("writing " + path + " not allowed");
+          }
+          return AgentResult.success("narrow fix", ArtifactOutput.of("patch", "{}", "test"));
+        };
+    start(
+        workflow(
+            "  - id: impl\n    agent: A\n    retry: { maxAttempts: 3 }\n"
+                + "    fallback: { strategy: minimal-patch }\n"),
+        AutonomyLevel.L2_TRUSTED,
+        agent);
+
+    awaitStatus(RunStatus.COMPLETED);
+    assertThat(ofType(EventType.STAGE_RETRIED)).as("a denial is never retried as it was").isEmpty();
+    assertThat(ofType(EventType.FALLBACK_USED))
+        .singleElement()
+        .satisfies(e ->
+            assertThat(e.payload())
+                .containsEntry("strategy", "minimal-patch")
+                .containsEntry("kind", "DENIED"));
+    assertThat(feedback).hasSize(2);
+    assertThat(feedback.get(1)).singleElement().asString().contains("README.md not allowed");
+  }
+
+  @Test
+  void aDeniedFallbackFailsTheStage() throws Exception {
+    Agent agent =
+        ctx -> {
+          ctx.authorize(new ProposedAction.FileWrite("README.md", "x"));
+          return AgentResult.success("wrote readme", ArtifactOutput.of("patch", "{}", "test"));
+        };
+    start(
+        workflow("  - id: impl\n    agent: A\n    fallback: { strategy: minimal-patch }\n"),
+        AutonomyLevel.L2_TRUSTED,
+        agent);
+
+    awaitStatus(RunStatus.FAILED);
+    assertThat(ofType(EventType.FALLBACK_USED)).hasSize(1);
+    assertThat(ofType(EventType.STAGE_FAILED))
+        .singleElement()
+        .satisfies(e -> assertThat(e.payload()).containsEntry("kind", "DENIED"));
+  }
+
+  @Test
   void policyChecksOfAFailedAttemptAreStillAudited() throws Exception {
     Agent agent =
         ctx -> {

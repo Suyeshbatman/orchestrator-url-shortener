@@ -1,0 +1,85 @@
+{
+  "modules": [
+    "shortener-service"
+  ],
+  "files": [
+    {
+      "path": "shortener-service/src/main/resources/db/migration/V3__link_expiry.sql",
+      "changeType": "ADD",
+      "reason": "nullable expires_at column; existing rows keep NULL (never expire)"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/link/Link.java",
+      "changeType": "MODIFY",
+      "reason": "new expiresAt component, isExpired(now), expiringAt(...)"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/link/CreateLinkRequest.java",
+      "changeType": "MODIFY",
+      "reason": "optional expiresAt and ttlSeconds; keep the two-argument constructor existing callers use"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/link/LinkResponse.java",
+      "changeType": "MODIFY",
+      "reason": "expiresAt in management responses"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/link/LinkService.java",
+      "changeType": "MODIFY",
+      "reason": "expiry validation on create, 410 on resolve, cache eviction on delete (BF-1)"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/cache/CacheEntry.java",
+      "changeType": "MODIFY",
+      "reason": "Found carries expiresAt so every level can be checked without a database read"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/cache/LinkCache.java",
+      "changeType": "MODIFY",
+      "reason": "a way to cache an expiring link with a capped TTL"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/cache/TieredLinkCache.java",
+      "changeType": "MODIFY",
+      "reason": "cap the Redis TTL at the time left before expiry"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/cache/RedisLinkCache.java",
+      "changeType": "MODIFY",
+      "reason": "store the expiry in the Redis value"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/api/ProblemTypes.java",
+      "changeType": "MODIFY",
+      "reason": "invalid-expiry and link-expired problem types"
+    },
+    {
+      "path": "shortener-service/src/main/java/com/acme/shortener/api/ProblemDetailsHandler.java",
+      "changeType": "MODIFY",
+      "reason": "map the two new exceptions to 400 and 410"
+    }
+  ],
+  "apis": [
+    "POST /api/v1/links: new optional fields expiresAt and ttlSeconds; new 400 invalid-expiry",
+    "GET /api/v1/links/{code}: new field expiresAt",
+    "GET /{code}: 410 link-expired for an expired link; 404 at once after a delete (was: 302 until the cache TTL)"
+  ],
+  "dataFlows": [
+    "create → LinkService validates the expiry → INSERT with expires_at → after commit the cache gets the entry with its expiry (Redis TTL capped)",
+    "redirect → L1 → L2 → DB; every Found entry's expiresAt is compared with the clock → 302 or 410",
+    "delete → UPDATE status DELETED → after commit evict L1 and L2 → next redirect reads the row and caches a 404"
+  ],
+  "migrations": [
+    "V3__link_expiry.sql: ALTER TABLE link ADD COLUMN expires_at TIMESTAMPTZ (nullable, no default, no backfill)"
+  ],
+  "riskNotes": [
+    "Caching: an expiring link must not outlive its expiry in any level; L1's fixed TTL is longer, so the entry itself must carry the expiry.",
+    "Rolling deploy: old instances read Redis values as U:<url>; a new format must not change the value for links without an expiry.",
+    "Concurrency: evicting before the delete commits would let a concurrent redirect re-cache the old row; evict after commit.",
+    "Cross-instance: other instances' L1 can serve a deleted link for up to the L1 TTL (5 minutes)."
+  ],
+  "testsToUpdate": [
+    "shortener-service/src/test/java/com/acme/shortener/link/LinkServiceTest.java",
+    "shortener-service/src/test/java/com/acme/shortener/link/LinkApiIT.java"
+  ]
+}

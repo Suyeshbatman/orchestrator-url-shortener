@@ -72,6 +72,9 @@ public final class ValidationAgent implements Agent {
   static final int SUMMARY_LINES = 40;
 
   /** Maven's boilerplate after the real errors. */
+  /** Test timings ("Time elapsed: 7.6 s"): they differ on every run. */
+  private static final Pattern ELAPSED = Pattern.compile(",? *(-- )?Time elapsed: [0-9.,]+ s");
+
   private static final Pattern MAVEN_HINT =
       Pattern.compile(
           "\\[ERROR\\]\\s*(-> \\[Help.*|Re-run Maven.*|To see the full.*|For more.*|\\[Help.*)?");
@@ -119,7 +122,10 @@ public final class ValidationAgent implements Agent {
                     .map(f -> Map.of("test", f.test(), "message", f.message()))
                     .toList()));
     report.put(
-        "coverage", Map.of("line", BigDecimal.valueOf(coverage).setScale(4, RoundingMode.HALF_UP)));
+        "coverage",
+        // to the percent: background threads make the last digits vary between runs, and the report
+        // feeds later prompts (and their replay hashes); the build itself enforces the exact gate
+        Map.of("line", BigDecimal.valueOf(coverage).setScale(2, RoundingMode.HALF_UP)));
     report.put(
         "policy",
         Map.of(
@@ -172,7 +178,12 @@ public final class ValidationAgent implements Agent {
     }
     String root = workspace.toString();
     List<String> lines =
-        build.output().strip().lines().map(l -> l.replace(root + File.separator, "")).toList();
+        build
+            .output()
+            .strip()
+            .lines()
+            .map(l -> ELAPSED.matcher(l.replace(root + File.separator, "")).replaceAll(""))
+            .toList();
     List<String> errors =
         lines.stream()
             .filter(l -> l.startsWith("[ERROR]"))

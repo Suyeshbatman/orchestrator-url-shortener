@@ -11,8 +11,13 @@ public enum FailureKind {
   TRANSIENT,
   /** The work was not good enough (schema or gate failure): retry, loop back or fall back. */
   VALIDATION,
-  /** Retrying can't help (policy DENY, missing inputs, illegal state): fail at once. */
+  /** Retrying can't help (missing inputs, illegal state): fail at once. */
   FATAL,
+  /**
+   * A policy said DENY. Never retried as it was: the stage's fallback (a narrower attempt) gets one
+   * try with the denial as feedback, and a stage without one fails.
+   */
+  DENIED,
   /** The run's LLM budget ran out: not the stage's fault; the run is safe-stopped. */
   BUDGET;
 

@@ -1,0 +1,10 @@
+# Scenario 7.2 — brownfield: link expiry plus the seeded bug BF-1 (deleted links keep redirecting).
+# Shows: impact analysis on the existing code; a design rejected in review and redone; a schema
+# migration that needs approval (CHG-001); a first implementation that fails validation and loops
+# back; an attempt to skip a failing test outside the path jail (DENY) and the minimal-patch fallback.
+mode: BROWNFIELD
+autonomy: L1_SUPERVISED
+base: main
+expect: COMPLETED
+decisions:
+  - { stage: design, decision: REJECT, comment: "use 410 not 404 for expired" }

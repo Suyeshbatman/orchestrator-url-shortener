@@ -9,6 +9,7 @@ import com.acme.orchestrator.agents.llm.PromptTemplates;
 import com.acme.orchestrator.agents.llm.RecordingLlmGateway;
 import com.acme.orchestrator.agents.llm.RedactingLlmGateway;
 import com.acme.orchestrator.agents.llm.ReplayLlmGateway;
+import com.acme.orchestrator.agents.llm.ReplayMissingException;
 import com.acme.orchestrator.agents.llm.SecretRedactor;
 import com.acme.orchestrator.agents.sdlc.AgentKit;
 import com.acme.orchestrator.agents.sdlc.SdlcAgents;
@@ -117,7 +118,7 @@ public final class ScenarioRunner {
     WorkflowDefinition workflow =
         new WorkflowLoader(gates).load(root.resolve("config/workflows").resolve(WORKFLOW));
 
-    LlmGateway llm = gateway(scenario, mode);
+    LlmGateway llm = gateway(scenario, mode, work);
     AgentKit kit =
         new AgentKit(new LlmClient(llm, schemas), new PromptTemplates(), AgentKit.SHORTENER);
     Map<String, Agent> agents =
@@ -202,10 +203,12 @@ public final class ScenarioRunner {
     return new Outcome(runId, state.run().status(), expected, audit, work);
   }
 
-  private LlmGateway gateway(Scenario scenario, LlmMode mode) throws IOException {
+  private LlmGateway gateway(Scenario scenario, LlmMode mode, Path work) throws IOException {
     LlmGateway gateway =
         switch (mode) {
-          case REPLAY -> new ReplayLlmGateway(scenario.replayDir());
+          case REPLAY ->
+              explainingMisses(
+                  new ReplayLlmGateway(scenario.replayDir()), work.resolve("replay-missing"));
           case RECORD -> {
             clearFixtures(scenario.replayDir());
             yield new RecordingLlmGateway(
@@ -239,6 +242,35 @@ public final class ScenarioRunner {
         config.apiKey().orElseThrow(),
         Optional.empty(),
         AnthropicLlmGateway.Settings.of(config.model(), config.fallbackModel()));
+  }
+
+  /**
+   * Replay, saving the full request of any call that has no fixture, so it can be compared with the
+   * recorded one: a miss means some prompt input changed between recording and replay.
+   */
+  static LlmGateway explainingMisses(LlmGateway replay, Path dir) {
+    return request -> {
+      try {
+        return replay.complete(request);
+      } catch (ReplayMissingException e) {
+        Path file = dir.resolve(request.agent() + "-" + System.nanoTime() + ".prompt.md");
+        try {
+          Files.createDirectories(dir);
+          Files.writeString(
+              file,
+              "## System\n"
+                  + request.systemPrompt()
+                  + "\n\n## User\n"
+                  + request.userPrompt()
+                  + "\n",
+              StandardCharsets.UTF_8);
+        } catch (IOException io) {
+          e.addSuppressed(io);
+          throw e;
+        }
+        throw new ReplayMissingException(e.getMessage() + "; the request is in " + file);
+      }
+    };
   }
 
   /** A bare clone of the repository whose main is {@code base}; returns that commit. */

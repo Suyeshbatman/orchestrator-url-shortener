@@ -723,7 +723,7 @@ public final class Coordinator implements AutoCloseable {
             .toList();
     if (!denied.isEmpty()) {
       failAttempt(
-          stageId, "policy denied: " + String.join("; ", denied), FailureKind.FATAL, Actor.SYSTEM);
+          stageId, "policy denied: " + String.join("; ", denied), FailureKind.DENIED, Actor.SYSTEM);
       return;
     }
 
@@ -867,7 +867,12 @@ public final class Coordinator implements AutoCloseable {
       requestSafeStop(f.reason(), Actor.SYSTEM, false, Map.of());
       return;
     }
-    failAttempt(f.stageKey(), f.reason(), f.kind(), actorOf(stages.get(f.stageKey())));
+    // an agent that stops because an action was denied failed on the denial, whatever it threw
+    FailureKind kind =
+        f.checks().stream().anyMatch(check -> check.decision().denied())
+            ? FailureKind.DENIED
+            : f.kind();
+    failAttempt(f.stageKey(), f.reason(), kind, actorOf(stages.get(f.stageKey())));
   }
 
   private void onApproval(ApprovalDecision d) {
@@ -1406,8 +1411,9 @@ public final class Coordinator implements AutoCloseable {
   /**
    * An attempt failed. In order: a validation failure of a stage with {@code onFailure} loops back
    * (while loops remain); a retryable failure is retried after a backoff (while attempts remain),
-   * then the stage's fallback is tried once; otherwise the stage fails, which fails the run (or,
-   * for a {@code highImpact} stage, halts it for a human).
+   * then the stage's fallback is tried once (straight away after a policy DENY, which is never
+   * retried as it was); otherwise the stage fails, which fails the run (or, for a {@code
+   * highImpact} stage, halts it for a human).
    */
   private void failAttempt(String stageKey, String reason, FailureKind kind, Actor actor) {
     StageDefinition def = stages.get(stageKey);
@@ -1426,7 +1432,9 @@ public final class Coordinator implements AutoCloseable {
         scheduleRetry(def, stage, reason, kind, restored);
         return;
       }
-      if (kind.retryable() && def.fallback().isPresent() && !fallbackUsedThisLoop(stageKey)) {
+      if ((kind.retryable() || kind == FailureKind.DENIED)
+          && def.fallback().isPresent()
+          && !fallbackUsedThisLoop(stageKey)) {
         String strategy = def.fallback().get().strategy();
         stageEvent(
             FALLBACK_USED,

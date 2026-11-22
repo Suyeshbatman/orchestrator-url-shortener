@@ -14,7 +14,8 @@ Report:
 - data flows that change (request → service → cache/DB → response);
 - database migrations needed (the next Flyway version number follows the existing ones);
 - risk notes: caching, concurrency, backwards compatibility, security;
-- existing tests that must be updated.
+- existing tests that must be updated: repository-relative paths of the test files whose
+  assertions pin behaviour the specification changes.
 
 ## User
 Specification (requirements_spec):

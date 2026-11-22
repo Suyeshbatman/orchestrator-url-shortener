@@ -149,7 +149,13 @@ class ValidationAgentTest {
     JsonNode report = validate(BROKEN_BUILD);
 
     assertThat(report.path("build").path("status").asString()).isEqualTo("FAILURE");
-    assertThat(report.path("build").path("summary").asString()).contains("';' expected");
+    assertThat(report.path("build").path("summary").asString())
+        .contains("';' expected")
+        .contains(
+            "Tests run: 5, Failures: 1, Errors: 0, Skipped: 0 <<< FAILURE! -- in com.acme.QrIT")
+        .contains("[ERROR] com.acme.QrIT.works <<< FAILURE!")
+        .doesNotContain("Time elapsed") // differs on every run: it would break replay
+        .doesNotContain("BUILD FAILURE"); // [INFO] lines are left out when there are errors
     assertThat(report.path("tests").path("total").asInt()).isZero(); // the old reports were cleared
     assertThat(report.path("coverage").path("line").asDouble()).isZero();
     assertThat(gates()).containsEntry("build.green", false).containsEntry("tests.green", false);

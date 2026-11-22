@@ -1,0 +1,138 @@
+{
+  "problemStatement": "Links need an optional expiry after which they stop redirecting and answer 410 Gone, and deleting a link must stop it redirecting at once: today a deleted link keeps redirecting from the cache for up to 24 hours (known issue BF-1).",
+  "functional": [
+    {
+      "id": "FR-1",
+      "text": "POST /api/v1/links accepts an optional expiresAt (ISO-8601 instant) or an optional ttlSeconds (integer seconds from now), not both; the created link's expiry is returned as expiresAt.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-2",
+      "text": "An unusable expiry is rejected with 400 and type /problems/invalid-expiry: both fields given, ttlSeconds outside 1-315360000, or expiresAt not in the future or more than ten years ahead.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-3",
+      "text": "GET /{code} of a link whose expiry has passed returns 410 Gone with type /problems/link-expired, whether the answer comes from a cache level or the database.",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-4",
+      "text": "Deleting a link stops it redirecting at once: the next GET /{code} returns 404 link-not-found even if the link was cached (fixes BF-1).",
+      "priority": "MUST"
+    },
+    {
+      "id": "FR-5",
+      "text": "GET /api/v1/links/{code} shows expiresAt (absent when the link never expires).",
+      "priority": "SHOULD"
+    }
+  ],
+  "nonFunctional": [
+    {
+      "id": "NFR-1",
+      "text": "No cache level serves a link after its expiry, and the Redis entry of an expiring link lives no longer than the time left before expiry.",
+      "category": "RELIABILITY"
+    },
+    {
+      "id": "NFR-2",
+      "text": "Links that never expire behave exactly as before, including their Redis entries, so old and new instances can run side by side during a rolling deploy.",
+      "category": "COMPATIBILITY"
+    },
+    {
+      "id": "NFR-3",
+      "text": "The redirect path adds no database read for cached links: the expiry check uses the cached entry.",
+      "category": "PERFORMANCE"
+    }
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "requirementId": "FR-1",
+      "given": "the clock at 2030-01-01T00:00:00Z",
+      "when": "a link is created with ttlSeconds 3600",
+      "then": "201 and expiresAt is 2030-01-01T01:00:00Z"
+    },
+    {
+      "id": "AC-2",
+      "requirementId": "FR-1",
+      "given": "no link",
+      "when": "a link is created with expiresAt 2030-06-01T12:00:00Z",
+      "then": "201 and expiresAt is 2030-06-01T12:00:00Z"
+    },
+    {
+      "id": "AC-3",
+      "requirementId": "FR-2",
+      "given": "a create request",
+      "when": "it has both fields, ttlSeconds 0 or 315360001, or expiresAt now, in the past or 11 years ahead",
+      "then": "400 with type /problems/invalid-expiry"
+    },
+    {
+      "id": "AC-4",
+      "requirementId": "FR-3",
+      "given": "a link with ttlSeconds 60 that has redirected once",
+      "when": "60 seconds pass and GET /{code}",
+      "then": "410 with type /problems/link-expired, from L1, from Redis and from the database"
+    },
+    {
+      "id": "AC-5",
+      "requirementId": "FR-4",
+      "given": "a link that has redirected once (cached)",
+      "when": "it is deleted and GET /{code}",
+      "then": "404 with type /problems/link-not-found"
+    },
+    {
+      "id": "AC-6",
+      "requirementId": "FR-5",
+      "given": "a link with an expiry",
+      "when": "GET /api/v1/links/{code}",
+      "then": "the body has expiresAt"
+    },
+    {
+      "id": "AC-7",
+      "requirementId": "NFR-1",
+      "given": "a link with ttlSeconds 600",
+      "when": "it is created",
+      "then": "its Redis key's TTL is at most 600 seconds"
+    },
+    {
+      "id": "AC-8",
+      "requirementId": "NFR-2",
+      "given": "a link without an expiry",
+      "when": "it is created",
+      "then": "its Redis value is U:<url> as before, and it still redirects ten years later"
+    }
+  ],
+  "assumptions": [
+    "Expiry is fixed at creation; changing it later is out of scope.",
+    "An expired link keeps status ACTIVE in the database: expiry is a time, not a status, so nothing needs to run when a link expires.",
+    "Deletion invalidates this instance's L1 and the shared Redis entry; other instances' in-process L1 entries can live until shortener.cache.l1-ttl (5 minutes)."
+  ],
+  "ambiguities": [
+    {
+      "id": "AMB-1",
+      "question": "Should an expired link answer 410 Gone or 404 like a deleted one?",
+      "options": [
+        "410 Gone",
+        "404 Not Found"
+      ],
+      "severity": "NONBLOCKING",
+      "proposedDefault": "410 Gone, as the requirement says"
+    },
+    {
+      "id": "AMB-2",
+      "question": "Must deletion also clear other instances' in-process caches at once?",
+      "options": [
+        "yes, with a Redis pub/sub broadcast",
+        "no, they expire within the L1 TTL"
+      ],
+      "severity": "NONBLOCKING",
+      "proposedDefault": "no: bounded by the 5-minute L1 TTL; noted as a follow-up"
+    }
+  ],
+  "outOfScope": [
+    "Changing or removing an expiry after creation",
+    "Purging expired links from the database",
+    "Cross-instance L1 invalidation (pub/sub)"
+  ],
+  "classification": "BROWNFIELD"
+}
