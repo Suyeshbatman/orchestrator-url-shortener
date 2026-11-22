@@ -3,7 +3,7 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.3.0] — 2026-11-22
 ### Added
 - **Fan-out scenario** `greenfield-fanout-notes` (`workflow: sdlc-fanout`). It adds link notes and
   a clicks CSV export, split into three tasks: T1 and T2 run in parallel, then T3. Its fixtures are
@@ -12,6 +12,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 - Hand-written replies for a fanned-out task are numbered per task
   (`replies/ImplementationAgent-T1-1.json`). `LlmRequest` carries the task, but not in the replay
   key.
+
+### Documentation
+- How to run the e2e: run `clean verify -Pe2e` without `-Dit.test`, which would run the scenarios
+  twice, and use `run-scenario <id>` to check a single scenario.
 
 ## [1.2.0] — 2026-11-22
 ### Added

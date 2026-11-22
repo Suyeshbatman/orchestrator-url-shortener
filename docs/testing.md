@@ -8,6 +8,12 @@ Run these in the repository root. Docker Desktop must be running.
 `clean` matters for `-Pe2e` after a failed run: failsafe merges each run into its summary file, so
 stale failures from the earlier run would fail the new one.
 
+**Don't add `-Dit.test=…` to `-Pe2e`.** The profile has two failsafe executions: the default one
+(`*IT`) and `e2e` (`*E2E`). `-Dit.test` replaces the includes of *both*, so the named class runs
+twice. For example, `-Dit.test=ScenariosE2E` runs every scenario twice, about 20 minutes. Run the
+profile as written. To check one scenario, run it from the CLI instead:
+`.\mvnw.cmd -q -pl orchestrator-cli exec:java "-Dexec.args=run-scenario <id>"` (about 2 minutes).
+
 ## The pyramid
 | Layer | What it proves | Where |
 |---|---|---|

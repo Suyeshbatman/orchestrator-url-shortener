@@ -4,11 +4,15 @@
 ```
 .\mvnw.cmd -q spotless:apply              # format (google-java-format); verify fails on unformatted code
 .\mvnw.cmd -q verify                      # everything: tests, ArchUnit, coverage gates, formatting (~4 min)
-.\mvnw.cmd clean verify -Pe2e             # also the scenarios end to end, and 7.1 in the sandbox (~12 min)
+.\mvnw.cmd clean verify -Pe2e             # also the four scenarios end to end, and 7.1 in the sandbox (~15 min)
 .\mvnw.cmd -q install -DskipTests         # build without tests (skips integration tests and coverage too)
 ```
 Docker Desktop must be running: integration tests use Testcontainers (`postgres:16-alpine`,
 `redis:7-alpine`). Details are in [docs/testing.md](docs/testing.md).
+
+Run `-Pe2e` as written, without `-Dit.test=…`. That flag makes both failsafe executions run the
+named class, so the scenarios run twice. To check a single scenario, use
+`run-scenario <id>` from the CLI (see [docs/testing.md](docs/testing.md)).
 
 ## Layout and boundaries
 | Module | May depend on | Enforced by |

@@ -95,7 +95,10 @@ git -C ..\shortener-remote.git update-ref refs/heads/main phase-7
   ```
 - The amendment body for 7.3 is `{"text": ...}`, with the text from `scenarios/ambiguous-abuse/scenario.yml`.
 
-**As tests:** `.\mvnw.cmd clean verify -Pe2e` runs all three through the API on Postgres.
+**As tests:** `.\mvnw.cmd clean verify -Pe2e` runs all three through the API on Postgres, plus the
+fan-out scenario `greenfield-fanout-notes`. Run it as written. Adding `-Dit.test=…` makes both
+failsafe executions of the profile run the named class, so the scenarios run twice. To run one
+scenario, use `run-scenario <id>` (above).
 
 ## 7. Live and record mode
 These modes cost API credit and are slow: implementation and test replies take minutes.
@@ -123,6 +126,7 @@ These modes cost API credit and are slow: implementation and test replies take m
 | 401 / 403 from the API | No key, an unknown key, or the wrong role: decisions need an approver key, starting runs and answers an operator key. |
 | `publish` refuses to merge | `ORCH_SOURCE_REPO` points at a working copy. Use a bare clone. |
 | `-Pe2e` fails right after a failed run | failsafe merged the old summary. Run with `clean`. |
+| `-Pe2e` runs the scenarios twice (about 20 min) | `-Dit.test=…` was added: it replaces the includes of both failsafe executions. Run `clean verify -Pe2e` without it, or `run-scenario <id>` for one scenario. |
 | Port 5434 / 8085 / 8086 in use | Change it in `.env` (`POSTGRES_PORT`) or with `--server.port`. |
 | Tests hang or fail to start containers | Start Docker Desktop. Testcontainers needs it for every `*IT`. |
 | A long `curl` command fails in PowerShell | It wrapped when pasted. Paste it on one line, and use `curl.exe`, not the `curl` alias. |

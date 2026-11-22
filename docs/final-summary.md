@@ -34,8 +34,9 @@ new functionality, a change to existing behaviour with a bug fix, and an ambiguo
 - formatting checks and coverage gates;
 - about 4 minutes.
 
-**Scenarios end to end.** `.\mvnw.cmd clean verify -Pe2e` runs all three through the HTTP API on
-Postgres in about 420 s, and
+**Scenarios end to end.** `.\mvnw.cmd clean verify -Pe2e` runs the three Phase 7 scenarios through
+the HTTP API on Postgres in about 420 s, plus about 120 s for the fan-out scenario. Run it without
+`-Dit.test` (see [testing.md](testing.md)). Then
 `SandboxedScenarioE2E` runs 7.1 again with every build in the Docker sandbox (197 s). Each one:
 - uses the real agents replaying fixtures, real Git workspaces, and a real build of the shortener;
 - asserts the final status, its control events, a valid hash chain and non-zero metrics.
